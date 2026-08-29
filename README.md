@@ -39,6 +39,7 @@ Fill in:
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | same page |
 | `SUPABASE_SERVICE_ROLE_KEY` | same page. Used only by route handlers and the seed script. |
 | `DEMO_USER_EMAIL` | who you are signed in as until Google SSO is switched on |
+| `SITE_PASSWORD` | shared password for a deployed site. Unset locally, required in production. |
 | `MOCK_CLAUDE` | set to `1` to run every workflow against fixtures — no key, no cost. See below. |
 
 `.env.local` is gitignored. Do not commit it, and do not paste these keys into a chat.
@@ -52,7 +53,12 @@ npm run seed       # loads calendar, people, classes and the registry
 
 `npm run ingest` needs Python with `python-docx` (`pip install python-docx`).
 
-### 5. Run
+### 5. Deploying
+
+The target is **lotsai.igaprep.com** on Vercel, functions pinned to Cape Town. Steps, environment
+variables and the shared-password gate that stands in for sign-in are in [DEPLOY.md](DEPLOY.md).
+
+### 6. Run
 
 ```bash
 npm run dev
