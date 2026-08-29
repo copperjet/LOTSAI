@@ -1,0 +1,8 @@
+node_modules
+.next
+.env.local
+.env*.local
+.vercel
+supabase/seed/*.json
+tsconfig.tsbuildinfo
+.gatecheck
