@@ -23,7 +23,7 @@ export interface StoreResult {
 }
 
 /** Output format per renderer: a planner is a PDF, a study pack is HTML. */
-const FORMAT: Record<string, { ext: string; contentType: string }> = {
+export const FORMAT: Record<string, { ext: string; contentType: string }> = {
   planner: { ext: 'pdf', contentType: 'application/pdf' },
   studypack: { ext: 'html', contentType: 'text/html; charset=utf-8' },
   'studypack-pdf': { ext: 'pdf', contentType: 'application/pdf' },

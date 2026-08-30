@@ -3,6 +3,7 @@ import { admin, currentUser, audit } from '@/lib/supabase';
 import * as engine from '@/lib/engine';
 import { packWorkKey, type PackContent, type RegistryWeekLite } from '@/lib/studypack';
 import { storeArtefact } from '@/lib/pdf/store';
+import { viewUrl } from '@/lib/artefactUrl';
 
 export const runtime = 'nodejs';
 export const maxDuration = 90;
@@ -95,6 +96,8 @@ export async function GET(req: NextRequest) {
   }
 
   const path = pack?.storage_path ?? `study_pack/${id}.html`;
-  const { data: signed } = await db.storage.from('artefacts').createSignedUrl(path, 60 * 60);
-  return NextResponse.json({ title: pack?.title ?? null, path, url: signed?.signedUrl ?? null });
+  // Our own route, not a signed storage URL: Supabase serves stored .html as
+  // text/plain, which printed the source instead of the page (see
+  // app/api/artefact/view/route.ts).
+  return NextResponse.json({ title: pack?.title ?? null, path, url: viewUrl('studypack-html', id) });
 }

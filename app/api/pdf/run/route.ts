@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser } from '@/lib/supabase';
 import * as engine from '@/lib/engine';
 import { storeArtefact } from '@/lib/pdf/store';
+import { viewUrl } from '@/lib/artefactUrl';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 /**
- * GET  /api/pdf/run?plannerId=<id>  — a signed URL for the stored planner PDF
+ * GET  /api/pdf/run?plannerId=<id>  — the URL of the stored planner PDF
  * POST /api/pdf/run  { plannerId }   — (re)render and store it
  *
  * Render is synchronous on approval; this route is the manual re-run for a job
@@ -15,8 +16,6 @@ export const maxDuration = 60;
  * bucket. doc_type is the Standard's key, so it always matches what storeArtefact
  * wrote — never a second string that could drift.
  */
-const BUCKET = 'artefacts';
-
 export async function GET(req: NextRequest) {
   const db = admin();
   await currentUser();
@@ -33,10 +32,9 @@ export async function GET(req: NextRequest) {
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
 
   const storagePath = job?.storage_path ?? path;
-  const { data: signed } = await db.storage.from(BUCKET).createSignedUrl(storagePath, 60 * 60);
   return NextResponse.json({
     status: job?.status ?? 'unknown', path: storagePath,
-    url: signed?.signedUrl ?? null, error: job?.last_error ?? null,
+    url: viewUrl('planner', plannerId), error: job?.last_error ?? null,
   });
 }
 

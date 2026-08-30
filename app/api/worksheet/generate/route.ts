@@ -3,6 +3,7 @@ import { admin, currentUser, audit } from '@/lib/supabase';
 import * as engine from '@/lib/engine';
 import { worksheetWorkKey, type WorksheetContent, type RegistryWeekLite } from '@/lib/worksheet';
 import { storeArtefact } from '@/lib/pdf/store';
+import { viewUrl } from '@/lib/artefactUrl';
 
 export const runtime = 'nodejs';
 export const maxDuration = 90;
@@ -99,6 +100,5 @@ export async function GET(req: NextRequest) {
   }
 
   const path = ws?.storage_path ?? `worksheet/${id}.pdf`;
-  const { data: signed } = await db.storage.from('artefacts').createSignedUrl(path, 60 * 60);
-  return NextResponse.json({ title: ws?.title ?? null, path, url: signed?.signedUrl ?? null });
+  return NextResponse.json({ title: ws?.title ?? null, path, url: viewUrl('worksheet', id) });
 }
