@@ -389,12 +389,6 @@ export default function App() {
           <button className="quiet" onClick={() => doGenerate(p, 'create')}>Start fresh instead</button>
         </div>
       </div>
-      {r.claimedBy && (
-        <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          {r.claimedBy} is planning this same week right now - so you two will not write it twice.
-          It never blocks you.
-        </p>
-      )}
     </>);
   }
 
@@ -560,12 +554,7 @@ export default function App() {
           <a className="btn" href={d.link} target="_blank" rel="noreferrer">Open it in Drive</a>
         </div>
       )}
-      {d.mock && (
-        <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          Drive is in demo mode - no file was actually uploaded. Set the Google service-account credential
-          and folder mapping to go live.
-        </p>
-      )}
+      {d.mock && <div className="row"><span className="pill grey">Demo</span></div>}
     </>);
     loadAgenda();
   }
@@ -700,12 +689,7 @@ export default function App() {
           <a className="btn" href={d.link} target="_blank" rel="noreferrer">Open it in Drive</a>
         </div>
       )}
-      {d.mock && (
-        <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          Drive is in demo mode - no file was actually uploaded. Set the Google service-account credential
-          and folder mapping to go live.
-        </p>
-      )}
+      {d.mock && <div className="row"><span className="pill grey">Demo</span></div>}
     </>);
     loadAgenda();
   }
@@ -768,12 +752,6 @@ export default function App() {
           {r.flagged.map((x: string) => <span key={x} className="pill warn">{x} flagged</span>)}
         </div>
       </div>
-      {r.flagged.length > 0 && (
-        <div className="note">
-          That flag carries into next week&rsquo;s plan for this class, and it is what lets the bank rank
-          by what actually worked. Nobody types a coverage percentage anywhere.
-        </div>
-      )}
       {r.question && <p className="said">{r.question}</p>}
     </>);
     loadAgenda();
@@ -879,10 +857,6 @@ export default function App() {
       {conflicts.length > 0 && (
         <div className="c pad">
           <b>{conflicts.length} conflict{conflicts.length === 1 ? '' : 's'} need a decision</b>
-          <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
-            Two files claim the same subject and semester. Say which is current and re-run the
-            import - it will not guess.
-          </p>
           {conflicts.map(g => (
             <details key={g.id} style={{ marginTop: 10 }}>
               <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>
@@ -901,10 +875,6 @@ export default function App() {
           <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
             {unreadable.length} unreadable · {unplaced.length} unplaced file{unplaced.length === 1 ? '' : 's'}
           </summary>
-          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '8px 0 0' }}>
-            These carry no signed-off weeks yet. Unreadable: matched to a subject but no week table
-            was found. Unplaced: the filename did not say which subject or year it belongs to.
-          </p>
         </details>
       )}
     </>);
@@ -933,37 +903,24 @@ export default function App() {
             <div className="bar-t"><i style={{ width: `${c.planned ? (100 * c.landed / c.planned) : 0}%` }} /></div>
           </div>
         ))}
-        <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          Denominators count teaching weeks only - 11 in Semester 1, not 14 or 15.
-        </p>
       </div>
     </>);
   }
 
   function doSpend() {
-    say(<>
-      <p className="said">Every call is metered - workflow, model, tokens, cached tokens, cost. This session so far: <b>${spend.toFixed(4)}</b>.</p>
-      <div className="note">
-        The full ledger is in the <code>ai_usage</code> table, one row per call. Nothing here is an
-        estimate to the board; it is a measurement.
-      </div>
-    </>);
+    say(<p className="said">Every call is metered - workflow, model, tokens, cached tokens, cost. This session so far: <b>${spend.toFixed(4)}</b>.</p>);
   }
 
   function boundary() {
-    say(<>
+    say(
       <div className="bound">
         <div className="eyebrow" style={{ marginBottom: 7 }}>Not something I do</div>
         <p style={{ fontSize: 14 }}>
           That is open-ended work, and a general assistant will do it better than I will.
           Use <b>ChatGPT</b> or <b>Claude</b> for it.
         </p>
-        <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8 }}>
-          I only do the school&rsquo;s repeated work - the things that happen every week, produce a LOTS
-          document, and depend on what this school actually teaches.
-        </p>
-      </div>
-    </>);
+      </div>,
+    );
   }
 
   // ---------- composer --------------------------------------------------
@@ -1366,11 +1323,6 @@ function PackCard({ r, onOpen, onPdf, onApprove }: {
         <button className="btn" onClick={onOpen}>Open the study pack</button>
         <button className="btn" onClick={onPdf}>Download printable PDF</button>
       </div>
-      <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-        Open it to check it first. Approving puts it in the shared bank and sends the printable PDF to
-        your subject&rsquo;s Drive folder. The interactive pack is for the screen; the PDF is the paper
-        version, with a tear-off answer key.
-      </p>
     </>
   );
 }
@@ -1440,10 +1392,6 @@ function WorksheetCard({ r, onOpen, onApprove }: {
         <button className="btn primary" onClick={onApprove}>Approve &amp; send to Drive</button>
         <button className="btn" onClick={onOpen}>Open the worksheet PDF</button>
       </div>
-      <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-        Open it to check it first. Approving puts it in the shared bank and sends the printable PDF -
-        with a tear-off answer key - to your subject&rsquo;s Drive folder.
-      </p>
     </>
   );
 }
@@ -1783,13 +1731,11 @@ function PlannerCard({ r, mode, onSubmit, openFolds, setOpenFolds }: {
            : sending ? 'Submitting…' : 'Submit for review'}
         </button>
       </div>
-      <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-        {editable
-          ? <>Every field here is editable in place - type into it and click away. Objectives come from
-              the registry and are not editable here. Your comments and the HOD&rsquo;s are never written by me.</>
-          : <>This plan is with your HOD, so it is no longer editable. Your comments and the
-              HOD&rsquo;s are never written by me.</>}
-      </p>
+      {!editable && (
+        <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+          This plan is with your HOD, so it is no longer editable.
+        </p>
+      )}
     </>
   );
 }
@@ -1838,7 +1784,6 @@ function ReviewCard({ it, onDecide }: {
           A returned planner needs a reason attached.
         </span>}
       </div>
-      <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>I never write in your comment box, and never in the teacher&rsquo;s.</p>
     </>
   );
 }
