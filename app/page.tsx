@@ -58,6 +58,7 @@ interface PackResult {
 }
 interface UploadResult {
   uploadId: string; filename: string; textLength: number;
+  files?: { filename: string; kind: string; textLength: number }[];
   refsFound: string[]; resolved: { ref: string; text: string; week_number: number }[];
   unresolved: string[]; note: string;
 }
@@ -102,9 +103,6 @@ const PHASES: Record<string, string[]> = {
   packPdf:   ['Laying it out for print.', 'Putting the answer key at the end.'],
   evaluate:  ['Writing that up for your planner.', 'Tagging the objectives.'],
   approve:   ['Filing it in the shared bank.', 'Sending the PDF to your Drive folder.'],
-  ocr:       ['Reading the picture.',
-              'Picking out the objective codes.',
-              'Checking each one against the registry.'],
 };
 
 /** Advance a phase list every six seconds, holding on the last line. */
@@ -261,7 +259,7 @@ export default function App() {
     // question about the term, not a request to start next week's planner.
     if (/calendar|term dates|which week|what week|when is week|what.{0,3}s next|whats next/.test(q)) return doCalendar();
     if (/worksheet|work sheet|task sheet|differentiat/.test(q)) return doWorksheet();
-    if (/upload|turn.*(pdf|file|document)|from a (pdf|file|document)/.test(q)) return doPackFromUpload();
+    if (/upload|photo|picture|image|scan|turn.*(pdf|file|document)|from a (pdf|file|document)/.test(q)) return doPackFromUpload();
     if (/study.?pack|revision|revise/.test(q)) return doStudyPack();
     if (/plan|planner|next week/.test(q) && plan) return doMatch(plan.payload as { classId: string; weekNumber: number });
     if (/how did|went|evaluat|period|lesson go/.test(q)) return doEvaluate();
@@ -1300,7 +1298,7 @@ function StudyPackPicker({ classes, today, onPick, onUpload }: {
         {' '}<button className="linkish" onClick={onUpload}
               style={{ background: 'none', border: 'none', padding: 0, color: 'var(--muted)',
                        textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}>
-          Or turn a file into one.
+          Or turn a file or a photo into one.
         </button>
       </p>
       <div className="row" style={{ marginTop: 10, gap: 7 }}>
@@ -1467,16 +1465,36 @@ function UploadCard({ classes, onBuild }: {
 }) {
   const [chosen, setChosen] = useState(classes[0]?.id ?? '');
   const k = classes.find(c => c.id === chosen) ?? classes[0];
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [over, setOver] = useState(false);
   const [state, setState] = useState<'idle' | 'reading' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<UploadResult | null>(null);
   const [err, setErr] = useState('');
 
+  // A photograph is worth showing back before it is sent: it is the only way a
+  // teacher can tell they have taken the right page, the right way up.
+  const [thumbs, setThumbs] = useState<{ name: string; url: string | null }[]>([]);
+  useEffect(() => {
+    const made = files.map(f => ({
+      name: f.name,
+      url: f.type.startsWith('image/') ? URL.createObjectURL(f) : null,
+    }));
+    setThumbs(made);
+    return () => made.forEach(t => { if (t.url) URL.revokeObjectURL(t.url); });
+  }, [files]);
+
+  function take(list: FileList | null) {
+    setFiles(list ? [...list].slice(0, 5) : []);
+    setState('idle'); setResult(null); setErr('');
+  }
+
   async function reconcile() {
-    if (!file || !k) return;
+    if (!files.length || !k) return;
     setState('reading'); setErr(''); setResult(null);
     const fd = new FormData();
-    fd.append('file', file); fd.append('subjectId', k.subject_id); fd.append('yearGroup', k.year_group);
+    // One field, repeated: several photographs of one worksheet are one document.
+    for (const f of files) fd.append('file', f);
+    fd.append('subjectId', k.subject_id); fd.append('yearGroup', k.year_group);
     try {
       const r = await fetch('/api/ingest/upload', { method: 'POST', body: fd }).then(r => r.json());
       if (r.error) { setState('error'); setErr(r.error); return; }
@@ -1489,7 +1507,7 @@ function UploadCard({ classes, onBuild }: {
   return (
     <>
       <p className="said">
-        Which subject is this file for? I match every objective code in it against that subject&rsquo;s
+        Which subject is this for? I match every objective code in it against that subject&rsquo;s
         registry, and build only from the ones the curriculum holds.
       </p>
       <div className="row" style={{ marginTop: 10, gap: 7 }}>
@@ -1500,14 +1518,43 @@ function UploadCard({ classes, onBuild }: {
         ))}
       </div>
 
-      <div className="c pad" style={{ marginTop: 12 }}>
-        <input type="file" accept=".pdf,.docx"
-               onChange={e => { setFile(e.target.files?.[0] ?? null); setState('idle'); setResult(null); }} />
+      <div className={`drop${over ? ' over' : ''}`}
+           onDragOver={e => { e.preventDefault(); setOver(true); }}
+           onDragLeave={() => setOver(false)}
+           onDrop={e => { e.preventDefault(); setOver(false); take(e.dataTransfer.files); }}>
+        <label className="dropbtn">
+          <input type="file" accept=".pdf,.docx,image/png,image/jpeg,image/webp" multiple
+                 onChange={e => take(e.target.files)} />
+          <span>Choose files</span>
+        </label>
+        <span className="drophint">or drop them here. Up to 5 - .pdf, .docx, or photographs of the pages.</span>
+
+        {thumbs.length > 0 && (
+          <div className="strip">
+            {thumbs.map((t, i) => (
+              <figure key={`${t.name}-${i}`} className="shot">
+                {t.url
+                  ? <img src={t.url} alt="" />
+                  : <span className="doc" aria-hidden>{t.name.toLowerCase().endsWith('.pdf') ? 'PDF' : 'DOC'}</span>}
+                <figcaption>{t.name}</figcaption>
+                {state === 'reading' && <span className="shotwait" aria-hidden />}
+                {state === 'done' && result?.files?.[i] && (
+                  <figcaption className="read">{result.files[i].textLength} characters read</figcaption>
+                )}
+              </figure>
+            ))}
+          </div>
+        )}
+
         <div className="acts" style={{ marginTop: 10 }}>
-          <button className="btn" disabled={!file || state === 'reading'} onClick={reconcile}>
-            {state === 'reading' ? 'Reading and reconciling…' : 'Reconcile against the registry'}
+          <button className="btn" disabled={!files.length || state === 'reading'} onClick={reconcile}>
+            {state === 'reading'
+              ? (files.some(f => f.type.startsWith('image/')) ? 'Reading the pages…' : 'Reading and reconciling…')
+              : 'Reconcile against the registry'}
           </button>
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>.pdf or .docx</span>
+          {files.some(f => f.type.startsWith('image/')) && (
+            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about $0.01 a page</span>
+          )}
         </div>
         {state === 'error' && <small className="cerr" style={{ display: 'block', marginTop: 8 }}>{err}</small>}
       </div>

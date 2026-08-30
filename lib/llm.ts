@@ -96,6 +96,15 @@ export interface CallOpts {
   cached?: string[];
   /** Volatile, per-request context. Must come after the cache breakpoint. */
   prompt: string;
+  /**
+   * Pictures the model should read - a photographed worksheet, a textbook page.
+   *
+   * They go through this contract rather than an SDK call of their own so that
+   * OCR is metered like everything else: one ai_usage row per call, no exception
+   * for the one workflow that happens to take an image (Addendum D section D8).
+   * Always volatile, so they follow the cache breakpoint.
+   */
+  images?: { mediaType: string; base64: string }[];
   system: string;
   maxTokens?: number;
   /** JSON schema. Structured output means no fragile parsing of prose. */

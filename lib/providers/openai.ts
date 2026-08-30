@@ -23,7 +23,17 @@ export async function complete(o: CallOpts, model: string): Promise<ProviderResu
   // OpenAI matches cached prefixes itself rather than taking an explicit
   // breakpoint, so the cached blocks simply come first and the volatile prompt
   // last — the same ordering the Anthropic breakpoint depends on.
-  const content = [...cached, o.prompt].map(text => ({ type: 'input_text' as const, text }));
+  const content: OpenAI.Responses.ResponseInputContent[] =
+    [...cached, o.prompt].map(text => ({ type: 'input_text' as const, text }));
+
+  // After the text, so the cached prefix stays a prefix.
+  for (const img of o.images ?? []) {
+    content.push({
+      type: 'input_image' as const,
+      image_url: `data:${img.mediaType};base64,${img.base64}`,
+      detail: 'auto' as const,
+    });
+  }
 
   // A stable key routes repeat requests to the same cache. Derived from the
   // prefix itself, so it changes exactly when the prefix does.

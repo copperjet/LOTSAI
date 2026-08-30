@@ -27,6 +27,15 @@ export async function complete(o: CallOpts, model: string): Promise<ProviderResu
   }
   content.push({ type: 'text', text: o.prompt });
 
+  // After the breakpoint, which sits on the last cached block: an image is
+  // per-request and must never land inside the shared prefix.
+  for (const img of o.images ?? []) {
+    content.push({
+      type: 'image',
+      source: { type: 'base64', media_type: img.mediaType as 'image/png' | 'image/jpeg' | 'image/webp', data: img.base64 },
+    });
+  }
+
   const res = await client().messages.create({
     model,
     max_tokens: o.maxTokens ?? 4096,

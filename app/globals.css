@@ -289,6 +289,28 @@ table.plan tr:last-child td{border-bottom:0;}
 .note{border-left:3px solid var(--forest-light);background:var(--forest-tint);padding:11px 15px;border-radius:0 10px 10px 0;font-size:13px;}
 .railtoggle{display:none;}
 
+/* ---- upload: a drop zone, and what was dropped ---- */
+.drop{margin-top:12px;padding:15px;border:1.5px dashed var(--line);border-radius:14px;background:var(--card);
+  transition:border-color .15s,background .15s;}
+.drop.over{border-color:var(--forest);background:var(--forest-tint);}
+.dropbtn{display:inline-block;cursor:pointer;}
+.dropbtn input{position:absolute;width:1px;height:1px;opacity:0;}
+.dropbtn span{display:inline-block;padding:7px 14px;border:1px solid var(--line);border-radius:99px;
+  font-size:13px;font-weight:600;background:var(--paper);}
+.dropbtn:hover span{border-color:var(--forest-light);}
+.dropbtn input:focus-visible + span{outline:2.5px solid var(--gold-bright);outline-offset:2px;}
+.drophint{margin-left:10px;font-size:12.5px;color:var(--muted);}
+.strip{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;}
+.shot{position:relative;margin:0;width:96px;}
+.shot img{width:96px;height:96px;object-fit:cover;border-radius:10px;border:1px solid var(--line);display:block;}
+.shot .doc{display:flex;align-items:center;justify-content:center;width:96px;height:96px;border-radius:10px;
+  border:1px solid var(--line);background:var(--forest-tint);color:var(--forest);font-size:13px;font-weight:700;}
+.shot figcaption{margin-top:5px;font-size:11px;color:var(--muted);line-height:1.35;overflow-wrap:anywhere;}
+.shot figcaption.read{color:var(--forest);}
+.shot .shotwait{position:absolute;inset:0;height:96px;border-radius:10px;background:rgba(255,255,255,.55);}
+.shot .shotwait::after{content:'';position:absolute;top:50%;left:50%;width:16px;height:16px;margin:-8px 0 0 -8px;
+  border:2px solid var(--line);border-top-color:var(--forest);border-radius:50%;animation:spin .7s linear infinite;}
+
 /* ---- progressive disclosure: the clutter control ---- */
 details.d{border-radius:14px;}
 details.d>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;font-size:13px;

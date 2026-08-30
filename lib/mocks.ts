@@ -164,6 +164,27 @@ export function mockWorksheet(cached: string) {
   };
 }
 
+/**
+ * A photographed worksheet, transcribed.
+ *
+ * The point of the fixture is the same as the others: exercise what the live path
+ * exercises. So it carries objective codes in the shape lib/ingest/reconcile.ts
+ * matches on - one that the seeded registry holds and one that it does not - and
+ * the upload route then genuinely resolves the first and reports the second,
+ * rather than the whole reconciliation being skipped under MOCK_LLM.
+ */
+export function mockOcr() {
+  return [
+    'CP4 English - Week 10 worksheet',
+    '',
+    'Objectives: 4Ri.04, 4Ri.02, 9Zz.99',
+    '',
+    'Task 1. Read the passage below and write down three facts you learned.',
+    'Task 2. Underline the words that tell you this is a non-fiction text.',
+    'Task 3. Explain, in one sentence, how the pictures help the reader.',
+  ].join('\n');
+}
+
 /** Routed on CallOpts.workflow. Anything unknown gets an empty object. */
 export function mockFor(workflow: string, cached: string, prompt: string): unknown {
   if (workflow === 'planner_create' || workflow === 'planner_adapt') return mockPlan(cached, prompt);
@@ -171,5 +192,8 @@ export function mockFor(workflow: string, cached: string, prompt: string): unkno
   if (workflow === 'quality_gate') return mockGate();
   if (workflow === 'studypack_create') return mockPack(cached);
   if (workflow === 'worksheet_create') return mockWorksheet(cached);
+  // Plain text, not JSON: the OCR call has no schema, so lib/llm.ts returns
+  // whatever the fixture is verbatim.
+  if (workflow === 'ocr_extract') return mockOcr();
   return {};
 }
