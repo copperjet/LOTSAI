@@ -43,6 +43,9 @@ interface ClassWeek {
 interface ClassCal { id: string; name: string; subject_id: string; year_group: string; weeks: ClassWeek[] }
 interface Person { email: string; full_name: string; role: string }
 
+interface Hit { id: string; label: string; note: string; kind: string; payload: Record<string, unknown> }
+interface SearchHits { planners: Hit[]; weeks: Hit[]; bank: Hit[] }
+
 const WHEN = (iso: string) =>
   new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
@@ -59,6 +62,10 @@ export default function App() {
   const [user, setUser] = useState<{ name: string; role: string } | null>(null);
   const [people, setPeople] = useState<Person[]>([]);
   const [me, setMe] = useState('');
+  const [mini, setMini] = useState(false);
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<SearchHits | null>(null);
+  const search = useRef<HTMLInputElement>(null);
   const [spend, setSpend] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
@@ -84,7 +91,31 @@ export default function App() {
     fetch('/api/whoami').then(r => r.json())
       .then(r => { setPeople(r.people ?? []); setMe(r.current ?? ''); })
       .catch(() => {});
+    try { setMini(localStorage.getItem('lots_rail') === 'mini'); } catch { /* private mode */ }
   }, []);
+
+  // Ctrl+B for the rail, / for search — the two every assistant already has.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = document.activeElement instanceof HTMLElement
+        && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); toggleRail(); }
+      else if (e.key === '/' && !typing) { e.preventDefault(); setMini(false); search.current?.focus(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  // Debounced, because every keystroke would otherwise be a round trip.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setHits(null); return; }
+    const t = setTimeout(() => {
+      fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json())
+        .then(setHits).catch(() => setHits(null));
+    }, 180);
+    return () => clearTimeout(t);
+  }, [query]);
   useEffect(() => { thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: 'smooth' }); }, [turns, busy]);
   useEffect(() => {
     const on = () => setOnline(true), off = () => setOnline(false);
@@ -168,6 +199,37 @@ export default function App() {
     return boundary();
   }
 
+  function toggleRail() {
+    setMini(m => {
+      const next = !m;
+      try { localStorage.setItem('lots_rail', next ? 'mini' : 'full'); } catch { /* private mode */ }
+      return next;
+    });
+  }
+
+  /** Open a planner that already exists. No model call, nothing overwritten. */
+  async function doOpen(plannerId: string) {
+    setBusy('Opening the planner…');
+    const r = await fetch(`/api/plan/open?plannerId=${plannerId}`).then(r => r.json());
+    setBusy(null);
+    if (r.error) return say(<div className="bound"><p>{r.error}</p></div>);
+    say(<PlannerCard r={r} mode={r.mode} onSubmit={() => doSubmit(r.plannerId)}
+                     openFolds={openFolds} setOpenFolds={setOpenFolds} />);
+  }
+
+  function pickHit(h: Hit) {
+    setQuery(''); setHits(null);
+    if (h.kind === 'planner') return doOpen(h.payload.plannerId as string);
+    if (h.kind === 'week') {
+      const classId = h.payload.classId as string | null;
+      if (!classId) return say(<div className="bound"><p style={{ fontSize: 14 }}>
+        That week belongs to a subject you do not teach.
+      </p></div>);
+      return doMatch({ classId, weekNumber: h.payload.weekNumber as number });
+    }
+    return doBank();
+  }
+
   // ---------- calendar and the plan picker ------------------------------
 
   async function loadCalendar() {
@@ -235,6 +297,30 @@ export default function App() {
     setBusy(null);
 
     if (r.blocked) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message}</p></div>);
+
+    // Generation replaces the planner and deletes its lessons, taking any
+    // evaluations with them. Where one already exists, opening it is the
+    // default and replacing it has to be asked for by name.
+    if (r.existing) {
+      const e = r.existing as { plannerId: string; status: string; lessons: number; mine: boolean; author: string | null };
+      return say(<>
+        <p className="said">
+          Week {p.weekNumber} already has a planner{e.mine ? '' : <> by <b>{e.author}</b></>} —
+          {' '}{SAYS[e.status] ?? e.status}, {e.lessons} lesson{e.lessons === 1 ? '' : 's'}.
+        </p>
+        <div className="acts">
+          <button className="btn primary" onClick={() => doOpen(e.plannerId)}>Open it</button>
+          {e.mine && e.status === 'draft' && (
+            <button className="btn" onClick={() => doGenerate(p, 'create')}>
+              Replace this draft
+            </button>
+          )}
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+            Replacing writes a new plan over this one, and the notes against its lessons go with it.
+          </span>
+        </div>
+      </>);
+    }
 
     if (r.registry.uncoded) {
       return say(<>
@@ -536,17 +622,30 @@ export default function App() {
 
   return (
     <div className="app">
-      <nav className="rail">
+      <nav className={`rail ${mini ? 'mini' : ''}`}>
         <div className="top">
           <img src={CREST} alt="Lusaka Oaktree School crest" />
-          <div><b>LOTS AI</b><small>Lusaka Oaktree</small></div>
+          <div className="wordmark"><b>LOTS AI</b><small>Lusaka Oaktree</small></div>
+          <button className="railtog" onClick={toggleRail} aria-expanded={!mini}
+                  title={`${mini ? 'Expand' : 'Collapse'} the sidebar (Ctrl+B)`}>
+            {mini ? '»' : '«'}
+          </button>
         </div>
-        <button className="newbtn" onClick={newTask}>
-          <span>✎</span> New task
+        <button className="newbtn" onClick={newTask} title="New task">
+          <span>✎</span> <span className="lbl">New task</span>
         </button>
+        <div className="srch">
+          <span aria-hidden>⌕</span>
+          <input ref={search} value={query} placeholder="Search planners and weeks"
+                 aria-label="Search planners, registry weeks and the shared bank"
+                 onChange={e => setQuery(e.target.value)}
+                 onKeyDown={e => { if (e.key === 'Escape') { setQuery(''); e.currentTarget.blur(); } }} />
+        </div>
+        <button className="minisearch" title="Search (/)"
+                onClick={() => { setMini(false); setTimeout(() => search.current?.focus(), 0); }}>⌕</button>
         <div className="scroll">
-          {agenda.map(i => (
-            <button key={i.id} className="ritem" onClick={() => run(i)}>
+          {hits ? <Results hits={hits} onPick={pickHit} /> : agenda.map(i => (
+            <button key={i.id} className="ritem" onClick={() => run(i)} title={i.title}>
               {i.title}<small>{i.note}</small>
             </button>
           ))}
@@ -645,6 +744,30 @@ function Fold({ id, label, children, open, setOpen }: {
  * check off by hand, which is the point: a list you maintain by hand is one more
  * thing owed, and this school already has enough of those.
  */
+/** Grouped search results, in the rail, in place of the agenda. */
+function Results({ hits, onPick }: { hits: SearchHits; onPick: (h: Hit) => void }) {
+  const groups: [string, Hit[]][] = [
+    ['Your planners', hits.planners],
+    ['Registry weeks', hits.weeks],
+    ['Shared bank', hits.bank],
+  ];
+  const total = groups.reduce((n, [, g]) => n + g.length, 0);
+  if (!total) return <p className="rgroup" style={{ textTransform: 'none', letterSpacing: 0 }}>Nothing matches.</p>;
+
+  return <>
+    {groups.filter(([, g]) => g.length).map(([name, g]) => (
+      <div key={name}>
+        <div className="rgroup">{name}</div>
+        {g.map(h => (
+          <button key={h.kind + h.id} className="ritem" onClick={() => onPick(h)} title={h.label}>
+            {h.label}<small>{h.note}</small>
+          </button>
+        ))}
+      </div>
+    ))}
+  </>;
+}
+
 /**
  * Pick a class, then a week. The agenda answers "what is due"; this answers
  * "I want a different one", which is the question the rail's New task used to

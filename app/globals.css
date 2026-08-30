@@ -57,11 +57,49 @@ button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;paddin
 code{font-family:ui-monospace,'Cascadia Mono',Menlo,monospace;}
 
 /* ================= app frame ================= */
-.app{display:grid;grid-template-columns:262px 1fr;height:100vh;overflow:hidden;}
+.app{display:grid;grid-template-columns:auto 1fr;height:100vh;overflow:hidden;}
 
 /* ---- left rail ---- */
-.rail{background:var(--rail);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;}
+/* Width lives on the rail, not on the grid: a track sized from a custom
+   property does not reliably re-resolve when the property changes, and the
+   collapsed state has to survive a reload. */
+.rail{width:262px;background:var(--rail);border-right:1px solid var(--line);display:flex;flex-direction:column;
+  min-height:0;transition:width .18s ease;}
+.rail.mini{width:58px;}
 .rail .top{padding:14px 12px 10px;display:flex;align-items:center;gap:9px;}
+.railtog{margin-left:auto;width:24px;height:24px;border-radius:8px;display:grid;place-items:center;
+  color:var(--muted);font-size:13px;line-height:1;transition:.12s;flex-shrink:0;}
+.railtog:hover{background:var(--forest-tint);color:var(--ink);}
+
+/* ---- search ---- */
+.srch{margin:0 12px 10px;display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:12px;
+  border:1px solid var(--line-soft);background:var(--card);transition:.15s;}
+.srch:focus-within{border-color:var(--forest-light);}
+.srch span{color:var(--muted);font-size:14px;line-height:1;}
+.srch input{flex:1;min-width:0;border:0;background:none;color:var(--ink);font:inherit;font-size:13.5px;outline:none;}
+.srch input::placeholder{color:var(--muted);}
+.minisearch{display:none;}
+
+/* ---- collapsed to an icon strip ---- */
+.rail.mini .wordmark,
+.rail.mini .srch,
+.rail.mini .newbtn .lbl,
+.rail.mini .scroll,
+.rail.mini .conn span,
+.rail.mini .acct .nm,
+.rail.mini .railsel,
+.rail.mini .sr{display:none;}
+.rail.mini .top{padding:14px 0 10px;justify-content:center;}
+.rail.mini .railtog{position:absolute;top:14px;left:50%;transform:translateX(-50%);opacity:0;}
+.rail.mini .top:hover .railtog,.rail.mini .railtog:focus-visible{opacity:1;background:var(--card);}
+.rail.mini .top:hover img{opacity:0;}
+.rail.mini .newbtn{margin:4px auto 8px;padding:9px;width:36px;justify-content:center;}
+.rail.mini .minisearch{display:grid;place-items:center;width:36px;height:36px;margin:0 auto;border-radius:12px;
+  border:1px solid var(--line-soft);background:var(--card);color:var(--muted);font-size:15px;transition:.12s;}
+.rail.mini .minisearch:hover{border-color:var(--forest-light);background:var(--forest-tint);color:var(--ink);}
+.rail.mini .foot{padding:10px 0;align-items:center;}
+.rail.mini .conn{justify-content:center;padding:0;}
+.rail.mini .acct{justify-content:center;padding:6px 0;}
 .rail .top img{width:26px;height:26px;border-radius:8px;background:#fff;display:block;}
 .rail .top b{font-family:var(--display);font-size:16px;font-weight:750;letter-spacing:-.015em;}
 .rail .top small{display:block;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:-3px;}
@@ -339,6 +377,11 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
   .app{grid-template-columns:1fr;}
   .rail{display:none;}
   .rail.open{display:flex;position:fixed;inset:0 auto 0 0;width:270px;z-index:60;box-shadow:var(--shadow);}
+  .rail,.rail.mini{width:auto;}
+  .rail.open,.rail.mini.open{width:270px;}
+  .rail.mini .wordmark,.rail.mini .srch,.rail.mini .scroll,
+  .rail.mini .newbtn .lbl,.rail.mini .acct .nm,.rail.mini .railsel{display:revert;}
+  .rail.mini .minisearch{display:none;}
   .railtoggle{display:grid;place-items:center;width:32px;height:32px;border:1px solid var(--line-soft);border-radius:12px;}
   .col,.dockcol{max-width:100%;}
   .opts{grid-template-columns:1fr;}

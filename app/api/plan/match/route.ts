@@ -66,8 +66,31 @@ export async function POST(req: NextRequest) {
     ? (claim as unknown as { app_user?: { full_name: string } }).app_user?.full_name ?? 'A colleague'
     : null;
 
+  // Is there already a planner for this class and week? Generation upserts the
+  // planner and deletes its lessons, so a caller that does not know this exists
+  // would quietly destroy a teacher's draft and the evaluations hanging off it.
+  const { data: schoolWeek } = await db.from('school_week').select('id')
+    .eq('academic_year', '2026-27').eq('semester', reg.semester)
+    .eq('week_number', weekNumber).maybeSingle();
+
+  const { data: had } = schoolWeek
+    ? await db.from('planner').select('id, status, teacher_id, app_user:teacher_id(full_name)')
+        .eq('class_id', classId).eq('school_week', schoolWeek.id).maybeSingle()
+    : { data: null };
+
+  const { count: lessonCount } = had
+    ? await db.from('lesson_entry').select('*', { count: 'exact', head: true }).eq('planner_id', had.id)
+    : { count: 0 };
+
   return NextResponse.json({
     workKey: key,
+    existing: had ? {
+      plannerId: had.id,
+      status: had.status,
+      lessons: lessonCount ?? 0,
+      mine: had.teacher_id === user.id,
+      author: (had as unknown as { app_user?: { full_name: string } }).app_user?.full_name ?? null,
+    } : null,
     registry: {
       topic: week.topic_label,
       objectives: week.objectives,

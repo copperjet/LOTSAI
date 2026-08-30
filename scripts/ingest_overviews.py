@@ -128,10 +128,25 @@ def header_map(table):
         offset = 1
     col = {}
     for i, h in enumerate(heads):
-        if 'week' in h and 'week' not in col:              col['week'] = i
-        elif 'objective' in h or 'topic' in h or 'unit' in h: col.setdefault('obj', i)
-        elif 'activit' in h:                                col.setdefault('act', i)
-        elif 'resource' in h:                               col.setdefault('res', i)
+        if 'week' in h and 'week' not in col:  col['week'] = i
+        elif 'activit' in h:                   col.setdefault('act', i)
+        elif 'resource' in h:                  col.setdefault('res', i)
+
+    # The objectives column is scored, not taken first-come. Several overviews
+    # run "UNIT / TOPIC | STRAND / FOCUS | LEARNING OBJECTIVES", and a
+    # first-match rule locks onto Unit and reads "Unit 4.1 Historical stories"
+    # as the objectives — which is how a document carrying 140 syllabus
+    # references imported as topic-only.
+    def rank(h):
+        if 'objective' in h: return 3
+        if 'topic' in h:     return 2
+        if 'unit' in h:      return 1
+        return 0
+
+    best = max(((rank(h), -i, i) for i, h in enumerate(heads) if rank(h)), default=None)
+    if best:
+        col['obj'] = best[2]
+
     return (col, offset) if 'week' in col and 'obj' in col else (None, offset)
 
 

@@ -80,15 +80,26 @@ MOCK_LLM=1 npm run dev
 
 Run on the school's real folder, 2026-27:
 
-- **172 week rows imported** across the year groups it could read
-- **11 of them carry Cambridge syllabus references.** The rest state objectives in prose
+- **198 week rows imported** across the year groups it could read
+- **54 of them carry Cambridge syllabus references.** The rest state objectives in prose
 - **10 duplicate conflicts** where two files claim the same subject, year and semester
 - **10 files excluded** — named `DELETE`, or labelled with a previous academic year
-- **63 could not be read** — mostly PDF with no Word version behind it
+- **62 could not be read** — mostly PDF with no Word version behind it
+
+Those 54 were 11 until the column mapping was fixed. `header_map` took the first header matching
+`objective | topic | unit`, and several overviews run
+`UNIT / TOPIC | STRAND / FOCUS | LEARNING OBJECTIVES` — so it locked onto Unit, read
+"Unit 4.1 Historical stories" as the objectives, and filed a document carrying 140 references as
+topic-only. The headers are scored now. The lesson generalises: before concluding that the school's
+documentation is missing something, check that the parser is looking at the right column.
 
 `supabase/seed/readiness_report.json` is the full breakdown, per subject. It is worth showing to the
 Academic Coordinator on its own: it answers a question the school currently cannot answer, which is
 whether its curriculum documentation is complete.
+
+After seeding, **26 weeks are signed off and plannable** — CP4 Mathematics and CP4 English. The rest
+stay blocked because their overviews genuinely carry no codes, and inventing one is the single thing
+this system must never do.
 
 **This is the critical path, not the app.** Only weeks with syllabus references can be matched
 between teachers or counted toward coverage, so `npm run seed` signs off only those and leaves
