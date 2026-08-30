@@ -6,3 +6,6 @@ node_modules
 supabase/seed/*.json
 tsconfig.tsbuildinfo
 .gatecheck
+
+.vercel
+.env*.local
