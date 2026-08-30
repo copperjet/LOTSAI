@@ -38,10 +38,10 @@ export function deterministic(i: GateInput): Check[] {
   const unknown = refs.filter(r => !i.registryRefs.includes(r));
   out.push(unknown.length
     ? { id: 'refs', status: 'block', title: 'An objective reference is not in the registry',
-        detail: `${unknown.join(', ')} — the model may not invent references. Check the registry for this week.` }
+        detail: `${unknown.join(', ')} - the model may not invent references. Check the registry for this week.` }
     : { id: 'refs', status: 'pass', title: 'Every syllabus reference resolves in the registry',
         detail: refs.length ? `${[...new Set(refs)].join(', ')} found.`
-                            : 'This week is topic-only — the overview states objectives in prose, with no codes.' });
+                            : 'This week is topic-only - the overview states objectives in prose, with no codes.' });
 
   const badDate = i.lessons.some(l => {
     const d = new Date(l.lesson_date), mon = new Date(i.weekCommencing);
@@ -73,7 +73,7 @@ export function deterministic(i: GateInput): Check[] {
                                                       || inv.toLowerCase().includes(r.toLowerCase())));
   out.push(missing.length
     ? { id: 'inventory', status: 'warn', title: 'A resource is not in the inventory',
-        detail: `${[...new Set(missing)].slice(0, 3).join('; ')} — either the inventory is out of date or it is not available.` }
+        detail: `${[...new Set(missing)].slice(0, 3).join('; ')} - either the inventory is out of date or it is not available.` }
     : { id: 'inventory', status: 'pass', title: 'Every resource is in the inventory', detail: '' });
 
   const placeholders = i.lessons.some(l => PLACEHOLDER.test(l.methodology + l.resources + l.differentiation));
@@ -130,7 +130,7 @@ export async function modelPass(i: GateInput, userId: string): Promise<Check[]> 
       'You check a Zambian primary school lesson plan against the LOTS Planning Standard. ' +
       'Judge only three things: register and tone; whether methodology names a real learner action ' +
       'rather than a category like "discussion"; and whether each activity actually serves its stated ' +
-      'objective. Never rewrite the plan. Never comment on anything else. Warn sparingly — a warning ' +
+      'objective. Never rewrite the plan. Never comment on anything else. Warn sparingly - a warning ' +
       'costs a teacher attention, so raise one only where a colleague would.',
     prompt: JSON.stringify(i.lessons.map(l => ({
       objectives: l.objectives.map(o => o.text),

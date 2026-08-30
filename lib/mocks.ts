@@ -154,7 +154,7 @@ export function mockWorksheet(cached: string) {
     objective_indexes: [i],
     core: `Task ${n + 1}: complete the questions on the topic, showing your working.`,
     support: 'Use the worked example at the top of the sheet, and the sentence stem provided, to start.',
-    extension: 'Explain, in a sentence, why your method works — and try it on a harder example of your own.',
+    extension: 'Explain, in a sentence, why your method works - and try it on a harder example of your own.',
     answer: 'Answers vary; accept correct working consistent with the objective.',
   }));
   return {

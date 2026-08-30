@@ -15,8 +15,14 @@
 import type { PackContent } from './studypack';
 import { CREST } from './crest';
 
+/** Long dashes to a plain hyphen — the school writes with hyphens, and a model
+ *  produces em dashes however firmly its prompt asks it not to. The PDF side does
+ *  the same in sanitizeWinAnsi (lib/pdf/layout.ts). */
+const DASHES = /[‒–—―]/g;
+
 const esc = (s: string) =>
-  String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  String(s ?? '').replace(DASHES, '-')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const json = (v: unknown) =>
   JSON.stringify(v).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
@@ -34,7 +40,7 @@ export function renderStudyPackHtml(pack: PackContent, meta: Meta): string {
     <div class="accordion">
       <div class="acc-header" onclick="toggleAcc(this)"><span>${esc(t.topic_label)}</span><span class="chev">&#9662;</span></div>
       <div class="acc-body"><div class="acc-content">
-        <div class="objective-tag">${t.objectives.map(o => esc((o.ref ? o.ref + ' — ' : '') + o.text)).join(' · ') || 'Objectives stated in prose'}</div>
+        <div class="objective-tag">${t.objectives.map(o => esc((o.ref ? o.ref + ' - ' : '') + o.text)).join(' · ') || 'Objectives stated in prose'}</div>
         <div class="key-ideas"><h4>Key ideas</h4><ul>${t.key_ideas.map(k => `<li>${esc(k)}</li>`).join('')}</ul></div>
         ${t.quiz.length ? `<div class="interactive-block"><h5>&#10067; Quick quiz</h5><div id="quiz-${ui}-${ti}"></div></div>` : ''}
         <div class="think-block"><h5>&#129504; Think further</h5><p>${esc(t.think_question)}</p></div>
@@ -54,7 +60,7 @@ export function renderStudyPackHtml(pack: PackContent, meta: Meta): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${esc(pack.title)} — LOTS Study Pack</title>
+<title>${esc(pack.title)} - LOTS Study Pack</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -135,7 +141,7 @@ export function renderStudyPackHtml(pack: PackContent, meta: Meta): string {
   <img class="school-logo" src="${CREST}" alt="LOTS crest">
   <div class="school-name">Lusaka Oaktree School</div>
   <h1>${esc(pack.title)}</h1>
-  <p class="sub">${esc(meta.yearGroup)} ${esc(meta.subject)} · Weeks ${meta.weekFrom}–${meta.weekTo}</p>
+  <p class="sub">${esc(meta.yearGroup)} ${esc(meta.subject)} · Weeks ${meta.weekFrom}-${meta.weekTo}</p>
   <div class="badges">${pack.units.map(u => `<span class="badge">${esc(u.unit_label)}</span>`).join('')}</div>
 </header>
 

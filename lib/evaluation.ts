@@ -50,7 +50,7 @@ Teacher's Comments box of a Lusaka Oaktree School weekly planner.
 
 Two jobs, and nothing else:
 
-1. Rewrite what they said in the register a teacher uses in a planner a head of department reads —
+1. Rewrite what they said in the register a teacher uses in a planner a head of department reads -
    plain, factual, British English, past tense, two or three sentences at most. Keep every fact and
    every reservation. Do not add praise, advice, targets or next steps. Do not invent detail the
    teacher did not give you. If they were brief, your comment is brief.
@@ -63,10 +63,12 @@ Two jobs, and nothing else:
    An index appears in at most one of the two lists, and at most once. An objective the class got
    is not also an objective needing revisiting.
 
-Ask a clarifying question only if you genuinely cannot tag the objectives — never more than one, and
+Ask a clarifying question only if you genuinely cannot tag the objectives - never more than one, and
 never about anything else. Most notes need no question.
 
-Never write in the HOD's voice. Never write in the first person as the teacher.`;
+Never write in the HOD's voice. Never write in the first person as the teacher.
+
+Never use an em dash or an en dash. Use a plain hyphen.`;
 
 /** What the model returns: indexes, never references. */
 interface TaggedByIndex {
@@ -100,7 +102,7 @@ export async function formatEvaluation(
     prompt: [
       `Lesson: ${lesson.className}, ${lesson.day}${lesson.period ? `, period ${lesson.period}` : ''}.`,
       `Objectives (tag these by index):`,
-      ...objectives.map((o, i) => `  [${i}] ${o.ref ? o.ref + ' — ' : ''}${o.text}`),
+      ...objectives.map((o, i) => `  [${i}] ${o.ref ? o.ref + ' - ' : ''}${o.text}`),
       `Planned methodology: ${lesson.methodology}`,
       ``,
       `The teacher said: "${raw}"`,

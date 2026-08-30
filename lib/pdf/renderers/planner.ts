@@ -74,13 +74,13 @@ export async function renderPlanner(plannerId: string): Promise<Uint8Array> {
 
   const ctx = await newDoc();
   const semester = week?.semester ?? 1;
-  const title = `Weekly Planner — Semester ${semester} (2026/27)`;
+  const title = `Weekly Planner - Semester ${semester} (2026/27)`;
 
   const st = new Sheet(ctx);
   await st.header(title, {
-    subject: subject?.name ?? klass?.subject_id ?? '—',
-    klass: klass?.name ?? '—',
-    teacher: teacher?.full_name ?? '—',
+    subject: subject?.name ?? klass?.subject_id ?? '-',
+    klass: klass?.name ?? '-',
+    teacher: teacher?.full_name ?? '-',
     week: `${week?.week_number ?? '?'}  ·  w/c ${week?.week_commencing ?? ''}`,
   });
   st.tableHeader();
@@ -90,7 +90,7 @@ export async function renderPlanner(plannerId: string): Promise<Uint8Array> {
     const hodComment = i === 0 && review?.comment ? review.comment : '';
     st.row({
       day: `${DAYS[l.day_of_week] ?? `Day ${l.day_of_week}`}${l.is_recap ? '\n(recap)' : ''}\n${l.lesson_date ?? ''}`,
-      obj: (l.objectives ?? []).map(o => `${o.ref ? o.ref + ' — ' : ''}${o.text}`).join('\n\n'),
+      obj: (l.objectives ?? []).map(o => `${o.ref ? o.ref + ' - ' : ''}${o.text}`).join('\n\n'),
       methods: methodsCell(l),
       teacher: l.teacher_comment ?? '',
       hod: hodComment,

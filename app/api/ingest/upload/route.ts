@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   const yearGroup = String(form.get('yearGroup') ?? '');
   if (!(file instanceof File)) return NextResponse.json({ error: 'No file' }, { status: 400 });
   if (!subjectId || !yearGroup) {
-    return NextResponse.json({ error: 'subjectId and yearGroup are required — an objective only resolves against a subject and year.' }, { status: 400 });
+    return NextResponse.json({ error: 'subjectId and yearGroup are required - an objective only resolves against a subject and year.' }, { status: 400 });
   }
 
   const name = file.name;

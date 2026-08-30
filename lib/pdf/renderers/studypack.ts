@@ -31,15 +31,15 @@ export async function renderStudyPackPdf(studyPackId: string): Promise<Uint8Arra
   if (!pack) throw new Error(`No study pack ${studyPackId}`);
 
   const content = pack.content as PackContent;
-  const title = `Study Pack — ${content.title ?? 'Revision'}`;
+  const title = `Study Pack - ${content.title ?? 'Revision'}`;
 
   const ctx = await newDoc();
   const cur = new Cursor(ctx);
   await drawHeader(ctx, cur, title);
   drawInfoStrip(ctx, cur, [
-    ['Subject', pack.subject_id ?? '—'],
-    ['Year', pack.year_group ?? '—'],
-    ['Weeks', `${pack.week_from}–${pack.week_to}`],
+    ['Subject', pack.subject_id ?? '-'],
+    ['Year', pack.year_group ?? '-'],
+    ['Weeks', `${pack.week_from}-${pack.week_to}`],
     ['Objectives', String(content.objective_refs?.length ?? 0)],
   ]);
 
@@ -91,7 +91,7 @@ export async function renderStudyPackPdf(studyPackId: string): Promise<Uint8Arra
   if (content.glossary?.length) {
     heading(ctx, cur, 'Glossary');
     for (const g of content.glossary) {
-      para(ctx, cur, `${g.term} — ${g.definition}`, ctx.regular, Fonts.bodySize, INK, 0, 3);
+      para(ctx, cur, `${g.term} - ${g.definition}`, ctx.regular, Fonts.bodySize, INK, 0, 3);
     }
   }
 
@@ -102,7 +102,7 @@ export async function renderStudyPackPdf(studyPackId: string): Promise<Uint8Arra
     heading(ctx, cur, 'Answer key');
     para(ctx, cur, 'Questions are numbered in the order they appear above.', ctx.italic, Fonts.smallSize, MUTED, 0, 6);
     for (const a of key) {
-      para(ctx, cur, `${a.n}.  ${a.correct}${a.explain ? ` — ${a.explain}` : ''}`, ctx.regular, Fonts.bodySize, INK, 0, 2);
+      para(ctx, cur, `${a.n}.  ${a.correct}${a.explain ? ` - ${a.explain}` : ''}`, ctx.regular, Fonts.bodySize, INK, 0, 2);
     }
   }
 

@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
   for (const p of planners ?? []) {
     const k = (classes ?? []).find(c => c.id === p.class_id);
     const week = p.week as unknown as { week_number: number } | null;
-    const label = `${k?.name ?? p.class_id} — Week ${week?.week_number ?? '?'}`;
+    const label = `${k?.name ?? p.class_id} - Week ${week?.week_number ?? '?'}`;
     if (!hit(label) && !hit(p.status) && !hit(k?.subject_id) && `week ${week?.week_number}` !== q) continue;
     plannerHits.push({
       id: p.id, kind: 'planner',
@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
     if (!hit(a.author_name) && !refs.some(hit) && !hit(a.subject_id) && !hit(`week ${a.week_number}`)) continue;
     bankHits.push({
       id: a.id, kind: 'bank',
-      label: `${a.author_name} — week ${a.week_number}`,
+      label: `${a.author_name} - week ${a.week_number}`,
       note: [refs.join(', '), a.landed_rate != null ? `${a.landed_rate}% landed` : null]
         .filter(Boolean).join(' · '),
       payload: { artefactId: a.id },

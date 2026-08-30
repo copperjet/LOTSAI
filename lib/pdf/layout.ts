@@ -77,10 +77,21 @@ export function parseHex(hex: string | null | undefined, fallback: RGB = rgb(0.1
  * from eScholr — do not "simplify" it.
  */
 const WINANSI_EXTRAS = '€‚ƒ„…†‡ˆ‰Š‹ŒŽ' + '‘’“”•–—˜™š›œžŸ';
+
+/**
+ * Long dashes, normalised to a plain hyphen before anything else.
+ *
+ * cp1252 has an em dash, so this is not a font question — the school writes with
+ * hyphens, and a model will produce an em dash however firmly its prompt asks it
+ * not to. Every PDF passes through here, so this is the one place that has to
+ * hold. lib/studypack_html.ts does the same for the interactive pack.
+ */
+const DASHES = /[‒–—―]/g;
+
 export function sanitizeWinAnsi(text: string | null | undefined): string {
   if (!text) return '';
   let out = '';
-  for (const ch of String(text).normalize('NFC')) {
+  for (const ch of String(text).normalize('NFC').replace(DASHES, '-')) {
     const cp = ch.codePointAt(0)!;
     if ((cp >= 0x20 && cp <= 0xff && cp !== 0x7f) || WINANSI_EXTRAS.includes(ch)) { out += ch; continue; }
     if (ch === '\t') { out += '  '; continue; }

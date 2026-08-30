@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
 
   if (!weeks?.length) {
     return NextResponse.json({ blocked: 'no_registry',
-      message: `The registry holds nothing for ${klass.year_group} ${klass.subject_id}, weeks ${weekFrom}–${weekTo}.` });
+      message: `The registry holds nothing for ${klass.year_group} ${klass.subject_id}, weeks ${weekFrom}-${weekTo}.` });
   }
   // A pack may only be built from signed-off weeks (Addendum C §C7). If any week
   // in the span is not signed off, say which rather than silently dropping it.

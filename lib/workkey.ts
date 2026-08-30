@@ -24,11 +24,11 @@ export function workKey(p: KeyParts): string {
 export type MatchTier = 1 | 2 | 3 | 4 | 5;
 
 export const TIER_MEANING: Record<MatchTier, { mode: 'reuse' | 'adapt'; why: string }> = {
-  1: { mode: 'reuse', why: 'Exact match — same objectives, same week, approved' },
+  1: { mode: 'reuse', why: 'Exact match - same objectives, same week, approved' },
   2: { mode: 'reuse', why: 'Same objectives, taught in a different week' },
   3: { mode: 'adapt', why: 'Same week last academic year' },
   4: { mode: 'adapt', why: 'Most of the same objectives' },
-  5: { mode: 'adapt', why: 'Same topic, different objectives — reference only' },
+  5: { mode: 'adapt', why: 'Same topic, different objectives - reference only' },
 };
 
 /** Jaccard over syllabus references. Tier 4 needs 60%. */

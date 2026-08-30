@@ -57,18 +57,20 @@ const SYSTEM = `You write differentiated worksheets for Lusaka Oaktree School, a
 school in Zambia.
 
 You are given the curriculum objectives for one week. You never write, reword, renumber or invent an
-objective — you only choose which of the supplied objectives each task addresses, by index.
+objective - you only choose which of the supplied objectives each task addresses, by index.
 
 For each task produce three tiers of the same task, aimed at the same objective(s):
 - core: the task most of the class does.
-- support: the same task made accessible — smaller numbers, a worked start, a sentence stem, or a
-  scaffold — for a learner who needs a way in. Never a different, easier objective.
-- extension: the same task pushed further — justify, generalise, apply to a new case — for a learner
+- support: the same task made accessible - smaller numbers, a worked start, a sentence stem, or a
+  scaffold - for a learner who needs a way in. Never a different, easier objective.
+- extension: the same task pushed further - justify, generalise, apply to a new case - for a learner
   who is ready. Never a new objective.
 Also give the expected answer, for the teacher's answer key.
 
 Write clear instructions a learner of this age can follow alone. Plain British English. Never use a
-learner's name. Do not include external links. Do not write anything a teacher would sign.`;
+learner's name. Do not include external links. Do not write anything a teacher would sign.
+
+Never use an em dash or an en dash. Use a plain hyphen.`;
 
 export interface GenerateWorksheetInput {
   week: RegistryWeekLite;
@@ -89,9 +91,9 @@ export async function generateWorksheet(input: GenerateWorksheetInput, userId: s
   // One flat, indexed objective list — the model tags into it, so an index always
   // resolves to a real registry objective.
   const flat: Objective[] = [];
-  const cachedLines: string[] = [`CURRICULUM — ${input.yearGroup} ${input.subjectId}, week ${input.weekNumber}: ${input.week.topic_label}`];
+  const cachedLines: string[] = [`CURRICULUM - ${input.yearGroup} ${input.subjectId}, week ${input.weekNumber}: ${input.week.topic_label}`];
   for (const o of input.week.objectives) {
-    cachedLines.push(`  [${flat.length}] ${o.ref ? o.ref + ' — ' : ''}${o.text}`);
+    cachedLines.push(`  [${flat.length}] ${o.ref ? o.ref + ' - ' : ''}${o.text}`);
     flat.push(o);
   }
 

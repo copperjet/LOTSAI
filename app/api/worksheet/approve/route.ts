@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   const safeName = (ws.title || 'Worksheet').replace(/[\\/:*?"<>|]/g, ' ').trim().slice(0, 120);
   const drive = await uploadToDrive({
     folderId: folderId ?? 'mock-folder',
-    filename: `${safeName} — ${ws.year_group} ${ws.subject_id} wk${ws.week_number}.pdf`,
+    filename: `${safeName} - ${ws.year_group} ${ws.subject_id} wk${ws.week_number}.pdf`,
     bytes, contentType: 'application/pdf',
   });
   if (!drive.ok) {

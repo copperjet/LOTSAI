@@ -84,11 +84,11 @@ const SYSTEM = `You build interactive study packs for Lusaka Oaktree School, a C
 school in Zambia.
 
 You are given the curriculum objectives for a span of weeks, already grouped by week. You never write,
-reword, renumber or invent an objective — you only choose which of the supplied objectives each topic
+reword, renumber or invent an objective - you only choose which of the supplied objectives each topic
 covers, by index.
 
 For each topic produce:
-- 3 to 6 short key ideas, in your own words, each scannable in under a minute — never a paragraph.
+- 3 to 6 short key ideas, in your own words, each scannable in under a minute - never a paragraph.
 - A short quiz of 2 to 4 multiple-choice questions with 3 or 4 options each, the index of the correct
   option, and a one-line explanation of why it is right. Questions test understanding, not trivia.
 - One open-ended "think" question that goes beyond recall (why / what if / compare).
@@ -96,7 +96,9 @@ For each topic produce:
 Also produce a glossary of the key terms across the whole pack, each with a one-line definition.
 
 Write in plain British English for the age group. Do not include external links or URLs. Do not write
-anything a teacher or HOD would sign — no comments, no marking.`;
+anything a teacher or HOD would sign - no comments, no marking.
+
+Never use an em dash or an en dash. Use a plain hyphen.`;
 
 export interface GeneratePackInput {
   weeks: RegistryWeekLite[];       // the signed-off weeks in the span, in order
@@ -120,11 +122,11 @@ export async function generateStudyPack(input: GeneratePackInput, userId: string
   // One flat, indexed objective list across the whole span — the model tags into
   // this, so an index always resolves to a real registry objective.
   const flat: Objective[] = [];
-  const cachedLines: string[] = [`CURRICULUM — ${input.yearGroup} ${input.subjectId}, weeks ${input.weekFrom}–${input.weekTo}`];
+  const cachedLines: string[] = [`CURRICULUM - ${input.yearGroup} ${input.subjectId}, weeks ${input.weekFrom}-${input.weekTo}`];
   for (const w of input.weeks) {
     cachedLines.push(`\nWeek ${w.week_number}: ${w.topic_label}`);
     for (const o of w.objectives) {
-      cachedLines.push(`  [${flat.length}] ${o.ref ? o.ref + ' — ' : ''}${o.text}`);
+      cachedLines.push(`  [${flat.length}] ${o.ref ? o.ref + ' - ' : ''}${o.text}`);
       flat.push(o);
     }
   }
@@ -239,8 +241,8 @@ export async function gateStudyPack(studyPackId: string) {
 
   const thinKeys = topics.filter(t => (t.key_ideas?.length ?? 0) < 3 || (t.key_ideas?.length ?? 0) > 6).length;
   checks.push(thinKeys
-    ? { id: 'key_ideas', status: 'warn', title: 'Key ideas outside 3–6 on some topics', detail: `${thinKeys} topic(s).` }
-    : { id: 'key_ideas', status: 'pass', title: 'Key ideas are 3–6 per topic', detail: '' });
+    ? { id: 'key_ideas', status: 'warn', title: 'Key ideas outside 3-6 on some topics', detail: `${thinKeys} topic(s).` }
+    : { id: 'key_ideas', status: 'pass', title: 'Key ideas are 3-6 per topic', detail: '' });
 
   checks.push(content.objective_refs?.length
     ? { id: 'objectives', status: 'pass', title: 'Objectives resolve to the registry', detail: `${content.objective_refs.length} references.` }

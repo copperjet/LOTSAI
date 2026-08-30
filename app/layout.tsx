@@ -17,7 +17,7 @@ const jakarta = Plus_Jakarta_Sans({
 
 export const metadata: Metadata = {
   title: 'LOTS AI',
-  description: 'Lusaka Oaktree School — weekly planning and lesson evaluation',
+  description: 'Lusaka Oaktree School - weekly planning and lesson evaluation',
 };
 
 export const viewport = { width: 'device-width', initialScale: 1 };

@@ -101,21 +101,23 @@ const PLAN_SCHEMA = {
 const SYSTEM = `You write weekly lesson plans for Lusaka Oaktree School, a Cambridge primary school in Zambia.
 
 You are given the week's objectives from the school's own curriculum registry. You never write, reword,
-renumber or invent an objective — you only choose which of the supplied objectives each lesson covers,
+renumber or invent an objective - you only choose which of the supplied objectives each lesson covers,
 by index.
 
 The LOTS Planning Standard, which you must meet:
 - Methodology names a real learner action, not a category. "Learners regroup numbers using place value
   blocks, then explain each regrouping to a partner" is right. "Discussion" is not.
 - Resources come only from the inventory you are given. If something useful is not in the inventory, use
-  what is and say so plainly in the resources field — never invent a resource the school may not own.
+  what is and say so plainly in the resources field - never invent a resource the school may not own.
 - Differentiation is named in three tiers on every lesson: support, core, extension.
 - Any objective flagged as not landed in recent weeks gets explicit recap time, marked is_recap.
 - Write in plain British English, in the register a Zambian primary teacher would use with a colleague.
 - Never write a teacher's comment or an HOD's comment. Those fields belong to people.
 
 Classes are large and resources are limited. Prefer activities that work with one set of materials,
-a chalkboard and a full classroom.`;
+a chalkboard and a full classroom.
+
+Never use an em dash or an en dash. Use a plain hyphen.`;
 
 export interface GenerateInput {
   reg: RegistryWeek;
@@ -135,24 +137,24 @@ export async function generatePlan(input: GenerateInput, userId: string) {
   // Stable for everyone planning this subject and week -> cached at 1h TTL.
   // Volatile, class-specific context goes in the prompt, after the breakpoint.
   const cached = [
-    `CURRICULUM REGISTRY — ${reg.year_group} ${reg.subject_id}, week ${reg.week_number}\n` +
+    `CURRICULUM REGISTRY - ${reg.year_group} ${reg.subject_id}, week ${reg.week_number}\n` +
     `Topic: ${reg.topic_label}\n` +
     `Objectives (use these indexes):\n` +
-    reg.objectives.map((o, i) => `  [${i}] ${o.ref ? o.ref + ' — ' : ''}${o.text}`).join('\n') +
+    reg.objectives.map((o, i) => `  [${i}] ${o.ref ? o.ref + ' - ' : ''}${o.text}`).join('\n') +
     (reg.activities.length ? `\nSuggested activities from the overview:\n` + reg.activities.map(a => `  - ${a}`).join('\n') : '') +
     (reg.resources.length ? `\nResources named in the overview:\n` + reg.resources.map(r => `  - ${r}`).join('\n') : ''),
-    `RESOURCE INVENTORY — only these are available:\n` + input.inventory.map(r => `  - ${r}`).join('\n'),
+    `RESOURCE INVENTORY - only these are available:\n` + input.inventory.map(r => `  - ${r}`).join('\n'),
   ];
 
   const prompt = [
     `This class has ${input.periodsPerWeek} periods this week, Monday to Friday, w/c ${input.weekCommencing}.`,
     input.flagged.length
-      ? `Not landed in recent weeks for THIS class — give explicit recap time and mark it is_recap:\n` +
+      ? `Not landed in recent weeks for THIS class - give explicit recap time and mark it is_recap:\n` +
         input.flagged.map(f => `  - ${f.ref}: ${f.text}\n    Teacher said: ${f.note}`).join('\n')
       : `Nothing was flagged as not landed for this class recently.`,
     adapting
       ? `You are ADAPTING a plan already approved by the HOD for a parallel class. Keep it as it is\n` +
-        `wherever it still fits. Change only what this class needs — the period count, and recap time\n` +
+        `wherever it still fits. Change only what this class needs - the period count, and recap time\n` +
         `for anything flagged above. Do not rewrite lessons that work.\n\n` +
         `THE APPROVED PLAN:\n` + basis!.map(b =>
           `  Day ${b.day_of_week}: ${b.methodology}\n    Resources: ${b.resources}\n    Differentiation: ${b.differentiation}`).join('\n')

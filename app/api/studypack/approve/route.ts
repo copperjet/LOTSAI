@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
   const safeName = (pack.title || 'Study Pack').replace(/[\\/:*?"<>|]/g, ' ').trim().slice(0, 120);
   const drive = await uploadToDrive({
     folderId: folderId ?? 'mock-folder',
-    filename: `${safeName} — ${pack.year_group} ${pack.subject_id}.pdf`,
+    filename: `${safeName} - ${pack.year_group} ${pack.subject_id}.pdf`,
     bytes, contentType: 'application/pdf',
   });
   if (!drive.ok) {

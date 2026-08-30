@@ -96,7 +96,7 @@ export async function GET() {
         also: `Week ${nextWeek.week_number} is also due Friday`,
         act: 'Start it', q: 'Shall I start it?', alt: `Plan Week ${nextWeek.week_number} first`,
         intent: 'plan', payload: { classId: firstUnplanned.id, weekNumber: nextWeek.week_number },
-        title: `${firstUnplanned.name} — Week ${nextWeek.week_number} planner`,
+        title: `${firstUnplanned.name} - Week ${nextWeek.week_number} planner`,
         note: 'Not started. Due Friday, before the week begins.', when: 'Due Fri',
       });
 
@@ -104,7 +104,7 @@ export async function GET() {
         const status = byClass.get(k.id)?.status ?? null;
         tasks.push({
           id: `plan-${k.id}`,
-          label: `Week ${nextWeek.week_number} planner — ${k.name}`,
+          label: `Week ${nextWeek.week_number} planner - ${k.name}`,
           note: status === null ? 'Not started. Due Friday.'
               : status === 'draft' ? 'Drafted, not submitted yet'
               : status === 'returned' ? 'Returned by your HOD'
@@ -138,7 +138,7 @@ export async function GET() {
       const k = (classes ?? []).find(c => c.id === p.class_id);
       tasks.push({
         id: `fix-${p.id}`,
-        label: `Fix the returned planner${k ? ` — ${k.name}` : ''}`,
+        label: `Fix the returned planner${k ? ` - ${k.name}` : ''}`,
         note: p.status === 'returned' ? 'Your HOD sent it back with a comment' : 'Fixed and sent back',
         done: p.status !== 'returned',
       });
@@ -146,7 +146,7 @@ export async function GET() {
 
     items.push({
       id: 'bank', kind: 'done',
-      lead: 'Nothing is outstanding — next week&rsquo;s drafts are already staged',
+      lead: 'Nothing is outstanding - next week&rsquo;s drafts are already staged',
       act: 'See what your year group has made', alt: 'See the shared bank', intent: 'bank',
       title: 'Shared bank', note: 'Everything your colleagues have had approved', when: 'Live',
     });

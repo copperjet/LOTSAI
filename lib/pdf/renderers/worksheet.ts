@@ -30,15 +30,15 @@ export async function renderWorksheet(worksheetId: string): Promise<Uint8Array> 
   if (!ws) throw new Error(`No worksheet ${worksheetId}`);
 
   const content = ws.content as WorksheetContent;
-  const title = `Worksheet — ${content.title ?? 'Tasks'}`;
+  const title = `Worksheet - ${content.title ?? 'Tasks'}`;
 
   const ctx = await newDoc();
   const cur = new Cursor(ctx);
   await drawHeader(ctx, cur, title);
   drawInfoStrip(ctx, cur, [
-    ['Subject', ws.subject_id ?? '—'],
-    ['Year', ws.year_group ?? '—'],
-    ['Week', String(ws.week_number ?? '—')],
+    ['Subject', ws.subject_id ?? '-'],
+    ['Year', ws.year_group ?? '-'],
+    ['Week', String(ws.week_number ?? '-')],
     ['Objectives', String(content.objective_refs?.length ?? 0)],
   ]);
 
@@ -70,9 +70,9 @@ export async function renderWorksheet(worksheetId: string): Promise<Uint8Array> 
     cur.page = newPage(ctx);
     cur.y = A4.height - Margins.top;
     heading(ctx, cur, 'Answer key');
-    para(cur, 'For the teacher — not for the handout.', ctx.italic, Fonts.smallSize, MUTED, 0, 6);
+    para(cur, 'For the teacher - not for the handout.', ctx.italic, Fonts.smallSize, MUTED, 0, 6);
     for (const a of key) {
-      para(cur, `Task ${a.n}.  ${a.answer || '—'}`, ctx.regular, Fonts.bodySize, INK, 0, 3);
+      para(cur, `Task ${a.n}.  ${a.answer || '-'}`, ctx.regular, Fonts.bodySize, INK, 0, 3);
     }
   }
 

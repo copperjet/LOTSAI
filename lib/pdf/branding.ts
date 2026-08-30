@@ -55,7 +55,7 @@ export function drawInfoStrip(ctx: DocCtx, cur: Cursor, pairs: Array<[string, st
     const x = Margins.left + i * colW + 10;
     cur.page.drawText(truncateToWidth(ctx.bold, sanitizeWinAnsi(label.toUpperCase()), Fonts.smallSize - 1, cellMaxW),
       { x, y: cur.y - 14, size: Fonts.smallSize - 1, font: ctx.bold, color: FOREST });
-    cur.page.drawText(truncateToWidth(ctx.regular, sanitizeWinAnsi(value || '—'), Fonts.bodySize, cellMaxW),
+    cur.page.drawText(truncateToWidth(ctx.regular, sanitizeWinAnsi(value || '-'), Fonts.bodySize, cellMaxW),
       { x, y: cur.y - 30, size: Fonts.bodySize, font: ctx.regular, color: rgb(0.1, 0.1, 0.15) });
   });
   cur.advance(stripH + 10);

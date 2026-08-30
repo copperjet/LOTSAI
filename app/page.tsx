@@ -276,8 +276,8 @@ export default function App() {
             <div className="acts" style={{ marginTop: 10 }}>
               {cal.classes.map(k => {
                 const wk = k.weeks.find(x => x.weekNumber === w.week_number);
-                const label = wk?.status ? `${k.name} — ${SAYS[wk.status] ?? wk.status}`
-                            : !wk?.signedOff ? `${k.name} — registry not signed off`
+                const label = wk?.status ? `${k.name} - ${SAYS[wk.status] ?? wk.status}`
+                            : !wk?.signedOff ? `${k.name} - registry not signed off`
                             : `Plan ${k.name}`;
                 return (
                   <button key={k.id} className="btn" disabled={!wk?.signedOff}
@@ -320,7 +320,7 @@ export default function App() {
       const e = r.existing as { plannerId: string; status: string; lessons: number; mine: boolean; author: string | null };
       return say(<>
         <p className="said">
-          Week {p.weekNumber} already has a planner{e.mine ? '' : <> by <b>{e.author}</b></>} —
+          Week {p.weekNumber} already has a planner{e.mine ? '' : <> by <b>{e.author}</b></>} -
           {' '}{SAYS[e.status] ?? e.status}, {e.lessons} lesson{e.lessons === 1 ? '' : 's'}.
         </p>
         <div className="acts">
@@ -342,7 +342,7 @@ export default function App() {
         <p className="said">
           Week {p.weekNumber} is in the registry, but this overview states its objectives in prose with
           no syllabus references. I will not invent codes, so I cannot match it against anyone else&rsquo;s
-          work — I can still write the plan.
+          work - I can still write the plan.
         </p>
         <div className="acts">
           <button className="btn primary" onClick={() => doGenerate(p, 'create')}>Write it anyway</button>
@@ -354,7 +354,7 @@ export default function App() {
     if (!best) {
       return say(<>
         <p className="said">
-          Nobody has planned <b>{r.registry.refs.join(' and ')}</b> for this year group yet. You are first —
+          Nobody has planned <b>{r.registry.refs.join(' and ')}</b> for this year group yet. You are first -
           what you write becomes the starting point for the other streams.
         </p>
         <div className="acts">
@@ -368,11 +368,11 @@ export default function App() {
     say(<>
       <p className="said">
         Week {p.weekNumber} is <b>{r.registry.refs.join(' and ')}</b>. Before generating anything I
-        checked the shared bank — somebody has already done this week.
+        checked the shared bank - somebody has already done this week.
       </p>
       <div className="match">
         <div className="flag">◆ {best.why}</div>
-        <h3 style={{ fontSize: 18 }}>{a.author_name} — week {a.week_number}</h3>
+        <h3 style={{ fontSize: 18 }}>{a.author_name} - week {a.week_number}</h3>
         <div className="row" style={{ marginTop: 10 }}>
           {a.objective_refs.map((ref: string) => <span key={ref} className="pill ref">{ref}</span>)}
           {a.landed_rate != null && <span className="pill ok">{a.landed_rate}% of objectives landed</span>}
@@ -381,7 +381,7 @@ export default function App() {
         <div className="acts" style={{ marginTop: 15 }}>
           <button className="btn primary" onClick={() => doGenerate(p, 'adapt', a.id)}>Adapt it for this class</button>
           <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-            about ${r.costs.adapt.toFixed(3)} — it only writes the difference
+            about ${r.costs.adapt.toFixed(3)} - it only writes the difference
           </span>
         </div>
         <div className="acts" style={{ marginTop: 10 }}>
@@ -391,7 +391,7 @@ export default function App() {
       </div>
       {r.claimedBy && (
         <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          {r.claimedBy} is planning this same week right now — so you two will not write it twice.
+          {r.claimedBy} is planning this same week right now - so you two will not write it twice.
           It never blocks you.
         </p>
       )}
@@ -447,8 +447,8 @@ export default function App() {
     if (r.uncoded) {
       return say(<>
         <p className="said">
-          Weeks {p.weekFrom}–{p.weekTo} are stated in prose with no syllabus references. I will not invent
-          codes, so I cannot match this against anyone else&rsquo;s pack — I can still build one.
+          Weeks {p.weekFrom}-{p.weekTo} are stated in prose with no syllabus references. I will not invent
+          codes, so I cannot match this against anyone else&rsquo;s pack - I can still build one.
         </p>
         <div className="acts">
           <button className="btn primary" onClick={() => doPackGenerate(p)}>Build it anyway</button>
@@ -463,7 +463,7 @@ export default function App() {
     if (!best) {
       return say(<>
         <p className="said">
-          Weeks {p.weekFrom}–{p.weekTo} cover {objectives}. Nobody has built a study pack for them yet —
+          Weeks {p.weekFrom}-{p.weekTo} cover {objectives}. Nobody has built a study pack for them yet -
           you are first.
         </p>
         <div className="row" style={{ gap: 5, marginTop: 8 }}>
@@ -478,7 +478,7 @@ export default function App() {
 
     say(<>
       <p className="said">
-        Weeks {p.weekFrom}–{p.weekTo} cover {objectives}. Somebody has already built an approved pack for
+        Weeks {p.weekFrom}-{p.weekTo} cover {objectives}. Somebody has already built an approved pack for
         the same objectives.
       </p>
       <div className="match">
@@ -490,7 +490,7 @@ export default function App() {
         </div>
         <div className="acts" style={{ marginTop: 15 }}>
           <button className="btn primary" onClick={() => openPack(best.id, true)}>Open it, unchanged</button>
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>free — no AI call</span>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>free - no AI call</span>
         </div>
         <div className="acts" style={{ marginTop: 10 }}>
           <button className="quiet" onClick={() => doPackGenerate(p)}>Build a new one instead</button>
@@ -562,7 +562,7 @@ export default function App() {
       )}
       {d.mock && (
         <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          Drive is in demo mode — no file was actually uploaded. Set the Google service-account credential
+          Drive is in demo mode - no file was actually uploaded. Set the Google service-account credential
           and folder mapping to go live.
         </p>
       )}
@@ -617,7 +617,7 @@ export default function App() {
       return say(<>
         <p className="said">
           Week {weekNumber} covers {refs.length} objective{refs.length === 1 ? '' : 's'}. Nobody has an
-          approved worksheet for them yet — you are first.
+          approved worksheet for them yet - you are first.
         </p>
         <div className="row" style={{ gap: 5, marginTop: 8 }}>
           {refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
@@ -643,7 +643,7 @@ export default function App() {
         </div>
         <div className="acts" style={{ marginTop: 15 }}>
           <button className="btn primary" onClick={() => openWorksheet(best.id, true)}>Open it, unchanged</button>
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>free — no AI call</span>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>free - no AI call</span>
         </div>
         <div className="acts" style={{ marginTop: 10 }}>
           <button className="quiet" onClick={() => doWorksheetGenerate(classId, weekNumber)}>Build a new one instead</button>
@@ -702,7 +702,7 @@ export default function App() {
       )}
       {d.mock && (
         <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          Drive is in demo mode — no file was actually uploaded. Set the Google service-account credential
+          Drive is in demo mode - no file was actually uploaded. Set the Google service-account credential
           and folder mapping to go live.
         </p>
       )}
@@ -721,12 +721,12 @@ export default function App() {
     const refs = (lesson.objectives as Objective[]).map(o => o.ref).filter(Boolean).join(', ');
     say(<>
       <p className="lead">
-        {DAYS[lesson.day_of_week]} — {refs || lesson.objectives[0]?.text?.slice(0, 60)}.<br />How did it go?
+        {DAYS[lesson.day_of_week]} - {refs || lesson.objectives[0]?.text?.slice(0, 60)}.<br />How did it go?
       </p>
       <div className="acts">
         <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
           {online ? 'Say it however you like, in the box below. Twenty seconds is plenty.'
-                  : 'You are offline — this will save on this device and sync later.'}
+                  : 'You are offline - this will save on this device and sync later.'}
         </span>
       </div>
     </>);
@@ -747,7 +747,7 @@ export default function App() {
       const queued = JSON.parse(localStorage.getItem('lots.pending') ?? '[]');
       queued.push({ lessonEntryId, raw, capturedAt: new Date().toISOString() });
       localStorage.setItem('lots.pending', JSON.stringify(queued));
-      return say(<p className="said">Saved on this device. <b>{queued.length} waiting to sync.</b> Capture never needs a connection — only generation does.</p>);
+      return say(<p className="said">Saved on this device. <b>{queued.length} waiting to sync.</b> Capture never needs a connection - only generation does.</p>);
     }
 
     setBusy('Formatting it for your planner and tagging the objectives…');
@@ -789,7 +789,7 @@ export default function App() {
       <div className="bgrid">
         {(r.bank ?? []).map((b: Record<string, unknown>) => (
           <div key={b.id as string} className="c bcard">
-            <h4>{b.author_name as string} — week {b.week_number as number}</h4>
+            <h4>{b.author_name as string} - week {b.week_number as number}</h4>
             <div className="row" style={{ gap: 5 }}>
               {((b.objective_refs as string[]) ?? []).map(x => <span key={x} className="pill ref">{x}</span>)}
             </div>
@@ -841,7 +841,7 @@ export default function App() {
     setBusy(null);
     if (r.url) { window.open(r.url, '_blank'); return; }
     say(<div className="bound"><p style={{ fontSize: 14 }}>
-      The PDF has not rendered yet. It renders on approval — try again in a moment.
+      The PDF has not rendered yet. It renders on approval - try again in a moment.
     </p></div>);
   }
 
@@ -881,7 +881,7 @@ export default function App() {
           <b>{conflicts.length} conflict{conflicts.length === 1 ? '' : 's'} need a decision</b>
           <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
             Two files claim the same subject and semester. Say which is current and re-run the
-            import — it will not guess.
+            import - it will not guess.
           </p>
           {conflicts.map(g => (
             <details key={g.id} style={{ marginTop: 10 }}>
@@ -934,7 +934,7 @@ export default function App() {
           </div>
         ))}
         <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          Denominators count teaching weeks only — 11 in Semester 1, not 14 or 15.
+          Denominators count teaching weeks only - 11 in Semester 1, not 14 or 15.
         </p>
       </div>
     </>);
@@ -942,7 +942,7 @@ export default function App() {
 
   function doSpend() {
     say(<>
-      <p className="said">Every call is metered — workflow, model, tokens, cached tokens, cost. This session so far: <b>${spend.toFixed(4)}</b>.</p>
+      <p className="said">Every call is metered - workflow, model, tokens, cached tokens, cost. This session so far: <b>${spend.toFixed(4)}</b>.</p>
       <div className="note">
         The full ledger is in the <code>ai_usage</code> table, one row per call. Nothing here is an
         estimate to the board; it is a measurement.
@@ -959,7 +959,7 @@ export default function App() {
           Use <b>ChatGPT</b> or <b>Claude</b> for it.
         </p>
         <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8 }}>
-          I only do the school&rsquo;s repeated work — the things that happen every week, produce a LOTS
+          I only do the school&rsquo;s repeated work - the things that happen every week, produce a LOTS
           document, and depend on what this school actually teaches.
         </p>
       </div>
@@ -1013,7 +1013,7 @@ export default function App() {
         <div className="foot">
           <div className="conn">
             <span className={`sw ${online ? 'on' : ''}`}><i /></span>
-            <span>{online ? 'Online' : 'Offline — capture still works'}</span>
+            <span>{online ? 'Online' : 'Offline - capture still works'}</span>
           </div>
           {user && <div className="acct"><span className="av">{user.name.split(' ').map(s => s[0]).join('')}</span>
             <span className="nm"><b>{user.name}</b><span>{user.role}</span></span></div>}
@@ -1032,7 +1032,7 @@ export default function App() {
                       setTurns([{ who: 'ai', node: opening(items) }]);
                     }}>
               {people.map(p => (
-                <option key={p.email} value={p.email}>{p.full_name} — {p.role}</option>
+                <option key={p.email} value={p.email}>{p.full_name} - {p.role}</option>
               ))}
             </select>
           </>}
@@ -1074,7 +1074,7 @@ export default function App() {
             </div>
             <div className="composer">
               <textarea ref={input} rows={1} value={draft}
-                placeholder={pending.current ? 'Say how the lesson went…' : 'Ask, or just pick one above — you never have to write a prompt'}
+                placeholder={pending.current ? 'Say how the lesson went…' : 'Ask, or just pick one above - you never have to write a prompt'}
                 onChange={e => setDraft(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
               <button className="send" onClick={send} aria-label="Send">↑</button>
@@ -1327,7 +1327,7 @@ function StudyPackPicker({ classes, today, onPick, onUpload }: {
           <div className="acts" style={{ marginTop: 13 }}>
             <button className="btn primary" disabled={!ready}
                     onClick={() => ready && onPick(k.id, from!, to!)}>
-              {ready ? `Find or build weeks ${from}–${to}` : 'Pick a start and end week'}
+              {ready ? `Find or build weeks ${from}-${to}` : 'Pick a start and end week'}
             </button>
           </div>
         </>
@@ -1346,14 +1346,14 @@ function PackCard({ r, onOpen, onPdf, onApprove }: {
   return (
     <>
       <p className="said">
-        Built. <b>{r.title}</b> — objectives are copied from the registry, the key ideas, quizzes and
+        Built. <b>{r.title}</b> - objectives are copied from the registry, the key ideas, quizzes and
         glossary are written for the age group.
       </p>
       <div className="c pad">
         <div className="eyebrow" style={{ marginBottom: 6 }}>What is in it</div>
         <ul style={{ margin: '0 0 10px', paddingLeft: 18, fontSize: 13.5 }}>
           {r.units.map((u, i) => (
-            <li key={i}>{u.label} — {u.topics} topic{u.topics === 1 ? '' : 's'}</li>
+            <li key={i}>{u.label} - {u.topics} topic{u.topics === 1 ? '' : 's'}</li>
           ))}
         </ul>
         <div className="row" style={{ gap: 5 }}>
@@ -1428,7 +1428,7 @@ function WorksheetCard({ r, onOpen, onApprove }: {
   return (
     <>
       <p className="said">
-        Built. <b>{r.title}</b> — {r.tasks} task{r.tasks === 1 ? '' : 's'}, each in three tiers
+        Built. <b>{r.title}</b> - {r.tasks} task{r.tasks === 1 ? '' : 's'}, each in three tiers
         (support, core, extension) with an answer key. Objectives are copied from the registry.
       </p>
       <div className="c pad">
@@ -1441,8 +1441,8 @@ function WorksheetCard({ r, onOpen, onApprove }: {
         <button className="btn" onClick={onOpen}>Open the worksheet PDF</button>
       </div>
       <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-        Open it to check it first. Approving puts it in the shared bank and sends the printable PDF —
-        with a tear-off answer key — to your subject&rsquo;s Drive folder.
+        Open it to check it first. Approving puts it in the shared bank and sends the printable PDF -
+        with a tear-off answer key - to your subject&rsquo;s Drive folder.
       </p>
     </>
   );
@@ -1473,7 +1473,7 @@ function UploadCard({ classes, onBuild }: {
       const r = await fetch('/api/ingest/upload', { method: 'POST', body: fd }).then(r => r.json());
       if (r.error) { setState('error'); setErr(r.error); return; }
       setResult(r as UploadResult); setState('done');
-    } catch { setState('error'); setErr('The upload failed. Nothing was saved — try again.'); }
+    } catch { setState('error'); setErr('The upload failed. Nothing was saved - try again.'); }
   }
 
   if (!k) return null;
@@ -1509,7 +1509,7 @@ function UploadCard({ classes, onBuild }: {
           <p style={{ fontSize: 13.5, margin: '0 0 8px' }}>{result.note}</p>
           {result.resolved.length > 0 && (
             <>
-              <div className="eyebrow" style={{ marginBottom: 5 }}>Resolved — these seed the pack</div>
+              <div className="eyebrow" style={{ marginBottom: 5 }}>Resolved - these seed the pack</div>
               <div className="row" style={{ gap: 5 }}>
                 {result.resolved.map(o => <span key={o.ref} className="pill ref">{o.ref}</span>)}
               </div>
@@ -1517,7 +1517,7 @@ function UploadCard({ classes, onBuild }: {
           )}
           {result.unresolved.length > 0 && (
             <>
-              <div className="eyebrow" style={{ margin: '11px 0 5px' }}>Not in the registry — never used</div>
+              <div className="eyebrow" style={{ margin: '11px 0 5px' }}>Not in the registry - never used</div>
               <div className="row" style={{ gap: 5 }}>
                 {result.unresolved.map(ref => <span key={ref} className="pill warn">{ref}</span>)}
               </div>
@@ -1764,7 +1764,7 @@ function PlannerCard({ r, mode, onSubmit, openFolds, setOpenFolds }: {
       </div>
 
       <Fold id="gate" open={openFolds} setOpen={setOpenFolds}
-            label={`Quality gate — ${gate.passed} passed${gate.warnings ? `, ${gate.warnings} to look at` : ''}${gate.blocking ? `, ${gate.blocking} blocking` : ''}`}>
+            label={`Quality gate - ${gate.passed} passed${gate.warnings ? `, ${gate.warnings} to look at` : ''}${gate.blocking ? `, ${gate.blocking} blocking` : ''}`}>
         <ul className="gatelist">
           {gate.checks.map(c => (
             <li key={c.id} className={c.status === 'pass' ? 'p' : c.status === 'warn' ? 'w' : 'b'}>
@@ -1785,7 +1785,7 @@ function PlannerCard({ r, mode, onSubmit, openFolds, setOpenFolds }: {
       </div>
       <p style={{ fontSize: 12, color: 'var(--muted)' }}>
         {editable
-          ? <>Every field here is editable in place — type into it and click away. Objectives come from
+          ? <>Every field here is editable in place - type into it and click away. Objectives come from
               the registry and are not editable here. Your comments and the HOD&rsquo;s are never written by me.</>
           : <>This plan is with your HOD, so it is no longer editable. Your comments and the
               HOD&rsquo;s are never written by me.</>}
@@ -1812,7 +1812,7 @@ function ReviewCard({ it, onDecide }: {
 
   return (
     <>
-      <p className="said"><b>{it.class_name}</b>, submitted by {it.teacher_name}. Compliance already passed — these are the ones worth your time.</p>
+      <p className="said"><b>{it.class_name}</b>, submitted by {it.teacher_name}. Compliance already passed - these are the ones worth your time.</p>
       <div className="gate">
         <header><h4>What the gate found</h4>
           <span className="pill ok">{it.gate?.passed ?? 0} passed</span>
