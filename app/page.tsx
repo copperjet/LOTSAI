@@ -1559,7 +1559,16 @@ function TodayBox({ tasks, date, onPick }: {
     return () => clearTimeout(h);
   }, [tasks]);
 
-  if (!tasks.length) return null;
+  // A fully ticked list has nothing left to say, so it leaves the corner rather
+  // than sitting there reading "4 of 4 done".
+  //
+  // It must not leave mid-tick, though. `was` is only written in the effect above,
+  // so on the render where the last task flips it is still stale — which is how the
+  // box knows to stay for this render, and `flashed` then holds it for the rest of
+  // the 1600 ms animation. Reading it here rather than waiting for the effect is
+  // what stops the box blinking out for a frame and back.
+  const flipping = tasks.some(t => t.done && was.current[t.id] === false);
+  if (!tasks.length || (tasks.every(t => t.done) && !flipping && !flashed.length)) return null;
 
   const done = tasks.filter(t => t.done).length;
 
