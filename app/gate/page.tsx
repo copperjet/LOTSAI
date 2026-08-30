@@ -17,9 +17,8 @@ export default async function Gate({ searchParams }: {
   return (
     <div className="gatepage">
       <form className="gatecard" method="post" action="/api/gate">
-        <img src={CREST} alt="LOTS AI" />
+        <img src={CREST} alt="Lusaka Oaktree School" />
         <h1>LOTS AI</h1>
-        <p>Weekly planning and lesson evaluation, for Lusaka Oaktree School.</p>
 
         <input type="hidden" name="next" value={next ?? '/'} />
         <input type="password" name="password" autoFocus required
@@ -28,11 +27,6 @@ export default async function Gate({ searchParams }: {
         <button className="btn primary" type="submit" disabled={e === 'unset'}>Continue</button>
 
         {message && <p className="gerr">{message}</p>}
-
-        <small>
-          One shared password stands in for sign-in until Google Workspace SSO is switched on.
-          Everyone who comes through it is signed in as the same demo user.
-        </small>
       </form>
     </div>
   );

@@ -75,7 +75,7 @@ export function renderStudyPackHtml(pack: PackContent, meta: Meta): string {
   @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important;}}
   body{margin:0;font-family:var(--font-body);background:radial-gradient(circle at 10% 0%,#eaf3ec 0%,transparent 40%),radial-gradient(circle at 90% 10%,#fdf3e0 0%,transparent 40%),var(--paper);color:var(--ink);line-height:1.5;padding-bottom:60px;}
   header.hero{background:linear-gradient(120deg,var(--forest-dark),var(--forest) 55%,var(--forest-light));color:#fff;padding:26px 20px 90px;text-align:center;position:relative;overflow:hidden;}
-  header.hero img.school-logo{width:60px;height:60px;border-radius:16px;background:#fff;padding:4px;box-shadow:0 2px 8px rgba(0,0,0,.25);}
+  header.hero img.school-logo{width:60px;height:60px;border-radius:50%;background:#fff;padding:4px;box-shadow:0 2px 8px rgba(0,0,0,.25);}
   header.hero .school-name{letter-spacing:.12em;font-size:.78rem;font-weight:600;opacity:.9;margin-top:8px;text-transform:uppercase;}
   header.hero h1{margin:8px 0 4px;font-size:2.1rem;font-family:var(--font-display);font-weight:700;text-wrap:balance;}
   header.hero p.sub{margin:2px 0;opacity:.95;}
@@ -138,7 +138,7 @@ export function renderStudyPackHtml(pack: PackContent, meta: Meta): string {
 </head>
 <body>
 <header class="hero">
-  <img class="school-logo" src="${CREST}" alt="LOTS AI">
+  <img class="school-logo" src="${CREST}" alt="Lusaka Oaktree School">
   <div class="school-name">Lusaka Oaktree School</div>
   <h1>${esc(pack.title)}</h1>
   <p class="sub">${esc(meta.yearGroup)} ${esc(meta.subject)} · Weeks ${meta.weekFrom}-${meta.weekTo}</p>

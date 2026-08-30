@@ -261,6 +261,19 @@ table.plan tr:last-child td{border-bottom:0;}
 .send{width:34px;height:34px;border-radius:50%;background:var(--forest);color:#FFFDF8;display:grid;place-items:center;
   font-size:15px;flex-shrink:0;transition:.15s;}
 .send:hover{background:var(--forest-light);}
+
+/* The clip: where anyone in a chat looks for "attach". Sits inside the composer
+   with the send button, so the two ends of the box are the two things you can do
+   to a message. */
+.clip{width:34px;height:34px;border-radius:50%;border:0;background:none;cursor:pointer;
+  display:grid;place-items:center;font-size:16px;line-height:1;color:var(--muted);
+  filter:grayscale(1);opacity:.72;transition:background .15s,opacity .15s;}
+.clip:hover{background:var(--forest-tint);opacity:1;}
+
+/* Anywhere on the thread is a drop target, so a photograph does not have to be
+   aimed at a particular box. */
+.thread.dropping{outline:2px dashed var(--forest-light);outline-offset:-10px;background:var(--forest-tint);}
+.thread.dropping *{pointer-events:none;}
 .mic{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;
   font-size:14px;flex-shrink:0;color:var(--muted);}
 .mic:hover{border-color:var(--forest);color:var(--forest);}

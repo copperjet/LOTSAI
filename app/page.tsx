@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CREST } from '@/lib/crest';
+import { MARK } from '@/lib/mark';
 
 /**
  * The chat shell (Addendum D section D5.1).
@@ -139,9 +140,11 @@ export default function App() {
   const setBusy = (line: string | null) => setBusyPhases(line ? [line] : null);
   const [online, setOnline] = useState(true);
   const [draft, setDraft] = useState('');
+  const [dropping, setDropping] = useState(false);
   const [openFolds, setOpenFolds] = useState<Record<string, boolean>>({});
   const thread = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
 
   const say = (node: React.ReactNode) => setTurns(t => [...t, { who: 'ai', node }]);
   const said = (text: string) => setTurns(t => [...t, { who: 'user', text }]);
@@ -615,10 +618,23 @@ export default function App() {
 
   /** The other door: a file the teacher already has. It is reconciled against the
    *  registry first — only the objectives the school's curriculum holds seed a pack. */
-  async function doPackFromUpload() {
+  async function doPackFromUpload(initial?: File[]) {
     const cal = await loadCalendar();
     if (!cal.classes.length) return say(<p className="said">You have no classes to reconcile a file against.</p>);
-    say(<UploadCard classes={cal.classes} onBuild={doBuildFromUpload} />);
+    say(<UploadCard classes={cal.classes} onBuild={doBuildFromUpload} initial={initial} />);
+  }
+
+  /**
+   * Files arriving from the clip, or dropped anywhere on the thread.
+   *
+   * The teacher's own turn names what they attached before anything is read, so
+   * the file is in the conversation the moment they let go of it.
+   */
+  function attach(list: FileList | null) {
+    const files = list ? [...list].slice(0, 5) : [];
+    if (!files.length) return;
+    said(files.length === 1 ? files[0].name : `${files.length} files`);
+    return doPackFromUpload(files);
   }
 
   async function doBuildFromUpload(uploadId: string) {
@@ -1000,7 +1016,7 @@ export default function App() {
     <div className="app">
       <nav className={`rail ${mini ? 'mini' : ''}`}>
         <div className="top">
-          <img src={CREST} alt="LOTS AI" />
+          <img src={CREST} alt="Lusaka Oaktree School" />
           <div className="wordmark"><b>LOTS AI</b><small>Lusaka Oaktree</small></div>
           <div className="tacts">
             <button className="railtog" onClick={() => setPalette(true)} title="Search (Ctrl+K)"
@@ -1066,12 +1082,15 @@ export default function App() {
 
         <TodayBox tasks={today} date={todayDate} onPick={runTask} />
 
-        <div className="thread" ref={thread}>
+        <div className={`thread${dropping ? ' dropping' : ''}`} ref={thread}
+             onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
+             onDragLeave={e => { if (e.currentTarget === e.target) setDropping(false); }}
+             onDrop={e => { e.preventDefault(); setDropping(false); attach(e.dataTransfer.files); }}>
           <div className="col">
             {turns.map((t, i) => t.who === 'user'
               ? <div key={i} className="turn user"><div className="bub">{t.text}</div></div>
-              : <div key={i} className="turn"><img className="crest" src={CREST} alt="" /><div className="body">{t.node}</div></div>)}
-            {saying && <div className="turn"><img className="crest" src={CREST} alt="" />
+              : <div key={i} className="turn"><img className="crest" src={MARK} alt="" /><div className="body">{t.node}</div></div>)}
+            {saying && <div className="turn"><img className="crest" src={MARK} alt="" />
               <div className="body"><div className="typing">
                 <p>{saying}</p>
                 <span className="dots" aria-hidden><i /><i /><i /></span>
@@ -1088,6 +1107,12 @@ export default function App() {
               ))}
             </div>
             <div className="composer">
+              <input ref={picker} type="file" className="sr"
+                     accept=".pdf,.docx,image/png,image/jpeg,image/webp" multiple
+                     onChange={e => { attach(e.target.files); e.target.value = ''; }} />
+              <button className="clip" onClick={() => picker.current?.click()}
+                      title="Attach a file or a photo of a page"
+                      aria-label="Attach a file or a photo of a page">&#128206;</button>
               <textarea ref={input} rows={1} value={draft}
                 placeholder={pending.current ? 'Say how the lesson went…' : 'Ask, or just pick one above - you never have to write a prompt'}
                 onChange={e => setDraft(e.target.value)}
@@ -1460,12 +1485,14 @@ function WorksheetCard({ r, onOpen, onApprove }: {
  * curriculum, and only the ones that resolve seed the pack. A code the file names
  * but the curriculum does not hold is shown and never used (main spec §4).
  */
-function UploadCard({ classes, onBuild }: {
+function UploadCard({ classes, onBuild, initial }: {
   classes: ClassCal[]; onBuild: (uploadId: string) => void;
+  /** Files the teacher already attached, from the clip or a drop on the thread. */
+  initial?: File[];
 }) {
   const [chosen, setChosen] = useState(classes[0]?.id ?? '');
   const k = classes.find(c => c.id === chosen) ?? classes[0];
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<File[]>(initial ?? []);
   const [over, setOver] = useState(false);
   const [state, setState] = useState<'idle' | 'reading' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<UploadResult | null>(null);
@@ -1507,8 +1534,11 @@ function UploadCard({ classes, onBuild }: {
   return (
     <>
       <p className="said">
-        Which subject is this for? I match every objective code in it against that subject&rsquo;s
-        registry, and build only from the ones the curriculum holds.
+        {files.length
+          ? <>Which subject {files.length === 1 ? 'is this' : 'are these'} for?</>
+          : <>Which subject is this for?</>}
+        {' '}I match every objective code in it against that subject&rsquo;s registry, and build only
+        from the ones the curriculum holds.
       </p>
       <div className="row" style={{ marginTop: 10, gap: 7 }}>
         {classes.map(c => (
