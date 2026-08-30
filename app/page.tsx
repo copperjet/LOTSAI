@@ -72,6 +72,53 @@ interface WorksheetMatch {
 const WHEN = (iso: string) =>
   new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
+/**
+ * What LOTS AI says while it is working.
+ *
+ * Generation takes twenty seconds to a minute, which is long enough that one
+ * frozen line reads as a hang. Each of these advances every six seconds and then
+ * holds on the last, so the bubble is still saying something true at fifty
+ * seconds without promising a finish time it cannot keep.
+ */
+const PHASES: Record<string, string[]> = {
+  match:     ['On it. Let me see if someone has already done this one.'],
+  plan:      ['Right, writing it now. This takes about a minute.',
+              'Reading the week’s objectives.',
+              'Splitting them across the periods.',
+              'Nearly there.'],
+  adapt:     ['Reading the plan your colleague had approved.',
+              'Working out what your class needs that theirs did not.',
+              'Writing only the difference.'],
+  reuse:     ['Taking it across unchanged.'],
+  pack:      ['Right, writing it now. This takes about a minute.',
+              'Reading the objectives for those weeks.',
+              'Writing the key ideas.',
+              'Making the quizzes and the glossary.',
+              'Nearly there.'],
+  worksheet: ['Writing the tasks, in three levels.',
+              'Reading the week’s objectives.',
+              'Making a support version and an extension of each one.',
+              'Nearly there.'],
+  packPdf:   ['Laying it out for print.', 'Putting the answer key at the end.'],
+  evaluate:  ['Writing that up for your planner.', 'Tagging the objectives.'],
+  approve:   ['Filing it in the shared bank.', 'Sending the PDF to your Drive folder.'],
+  ocr:       ['Reading the picture.',
+              'Picking out the objective codes.',
+              'Checking each one against the registry.'],
+};
+
+/** Advance a phase list every six seconds, holding on the last line. */
+function useBusyPhases(phases: string[] | null) {
+  const [at, setAt] = useState(0);
+  useEffect(() => {
+    setAt(0);
+    if (!phases || phases.length < 2) return;
+    const h = setInterval(() => setAt(i => Math.min(i + 1, phases.length - 1)), 6000);
+    return () => clearInterval(h);
+  }, [phases]);
+  return phases ? phases[Math.min(at, phases.length - 1)] : null;
+}
+
 const SAYS: Record<string, string> = {
   draft: 'drafted, not submitted', submitted: 'submitted for review',
   reviewed: 'reviewed', approved: 'approved', returned: 'returned by your HOD',
@@ -88,7 +135,10 @@ export default function App() {
   const [mini, setMini] = useState(false);
   const [palette, setPalette] = useState(false);
   const [spend, setSpend] = useState(0);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusyPhases] = useState<string[] | null>(null);
+  const saying = useBusyPhases(busy);
+  /** One line, for the short waits that never get as far as a second phase. */
+  const setBusy = (line: string | null) => setBusyPhases(line ? [line] : null);
   const [online, setOnline] = useState(true);
   const [draft, setDraft] = useState('');
   const [openFolds, setOpenFolds] = useState<Record<string, boolean>>({});
@@ -128,7 +178,15 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  useEffect(() => { thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: 'smooth' }); }, [turns, busy]);
+  // The teacher's own message should already be there by the time they look; the
+  // reply is something arriving, so it slides. Smooth-scrolling both makes a turn
+  // you just sent feel like it is being fetched from somewhere.
+  useEffect(() => {
+    const mine = turns[turns.length - 1]?.who === 'user';
+    thread.current?.scrollTo({
+      top: thread.current.scrollHeight, behavior: mine ? 'auto' : 'smooth',
+    });
+  }, [turns, busy]);
   useEffect(() => {
     const on = () => setOnline(true), off = () => setOnline(false);
     window.addEventListener('online', on); window.addEventListener('offline', off);
@@ -224,7 +282,7 @@ export default function App() {
 
   /** Open a planner that already exists. No model call, nothing overwritten. */
   async function doOpen(plannerId: string) {
-    setBusy('Opening the planner…');
+    setBusy('Getting it up for you.');
     const r = await fetch(`/api/plan/open?plannerId=${plannerId}`).then(r => r.json());
     setBusy(null);
     if (r.error) return say(<div className="bound"><p>{r.error}</p></div>);
@@ -248,7 +306,7 @@ export default function App() {
   // ---------- calendar and the plan picker ------------------------------
 
   async function loadCalendar() {
-    setBusy('Reading the school calendar…');
+    setBusy('Looking at the term.');
     const r = await fetch('/api/calendar').then(r => r.json());
     setBusy(null);
     return r as {
@@ -305,7 +363,7 @@ export default function App() {
 
   // ---------- planner ---------------------------------------------------
   async function doMatch(p: { classId: string; weekNumber: number }) {
-    setBusy('Checking the registry, then the shared bank…');
+    setBusyPhases(PHASES.match);
     const r = await fetch('/api/plan/match', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(p),
     }).then(r => r.json());
@@ -393,9 +451,7 @@ export default function App() {
   }
 
   async function doGenerate(p: { classId: string; weekNumber: number }, mode: string, basisArtifactId?: string) {
-    setBusy(mode === 'reuse' ? 'Copying the approved plan…'
-      : mode === 'adapt' ? 'Reading the approved plan and your class, then writing only the difference…'
-      : 'Pulling the objectives from the registry and splitting the week…');
+    setBusyPhases(mode === 'reuse' ? PHASES.reuse : mode === 'adapt' ? PHASES.adapt : PHASES.plan);
     const r = await fetch('/api/plan/generate', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...p, mode, basisArtifactId }),
@@ -430,7 +486,7 @@ export default function App() {
   /** Search before generate. An approved pack for the same objectives is offered
    *  to open unchanged; otherwise the only path is to build one. */
   async function doPackMatch(p: PackSpan) {
-    setBusy('Checking the registry, then the shared bank…');
+    setBusyPhases(PHASES.match);
     const r = await fetch('/api/studypack/match', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(p),
     }).then(r => r.json());
@@ -494,7 +550,7 @@ export default function App() {
   }
 
   async function doPackGenerate(p: PackSpan) {
-    setBusy('Pulling the objectives from the registry and writing the pack…');
+    setBusyPhases(PHASES.pack);
     const r = await fetch('/api/studypack/generate', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(p),
     }).then(r => r.json());
@@ -510,7 +566,7 @@ export default function App() {
    *  bank unchanged, which is what the bank's reuse_count ranks by. */
   async function openPack(studyPackId: string | null, reuse = false) {
     if (!studyPackId) return;
-    setBusy('Fetching the pack…');
+    setBusy('Opening it.');
     const r = await fetch(`/api/studypack/generate?studyPackId=${studyPackId}${reuse ? '&reuse=1' : ''}`).then(r => r.json());
     setBusy(null);
     if (r.url) { window.open(r.url, '_blank'); return; }
@@ -522,7 +578,7 @@ export default function App() {
   /** The printable companion — rendered on demand, since most packs stay on screen. */
   async function openPackPdf(studyPackId: string | null) {
     if (!studyPackId) return;
-    setBusy('Laying out the printable PDF, with the answer key at the end…');
+    setBusyPhases(PHASES.packPdf);
     const r = await fetch('/api/studypack/pdf', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ studyPackId }),
     }).then(r => r.json());
@@ -537,7 +593,7 @@ export default function App() {
    *  printable PDF is delivered to the subject's Drive folder. */
   async function doApprovePack(studyPackId: string | null) {
     if (!studyPackId) return;
-    setBusy('Rendering the PDF and sending it to the subject’s Drive folder…');
+    setBusyPhases(PHASES.approve);
     const r = await fetch('/api/studypack/approve', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ studyPackId }),
     }).then(r => r.json());
@@ -568,7 +624,7 @@ export default function App() {
   }
 
   async function doBuildFromUpload(uploadId: string) {
-    setBusy('Reading the resolved objectives and writing the pack…');
+    setBusyPhases(PHASES.pack);
     const r = await fetch('/api/studypack/from-upload', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ uploadId }),
     }).then(r => r.json());
@@ -592,7 +648,7 @@ export default function App() {
   /** Search before generate: offer an approved worksheet for the same objectives
    *  to reuse, otherwise build one. */
   async function doWorksheetMatch(classId: string, weekNumber: number) {
-    setBusy('Checking the registry, then the shared bank…');
+    setBusyPhases(PHASES.match);
     const r = await fetch('/api/worksheet/match', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ classId, weekNumber }),
     }).then(r => r.json());
@@ -642,7 +698,7 @@ export default function App() {
   }
 
   async function doWorksheetGenerate(classId: string, weekNumber: number) {
-    setBusy('Pulling the week’s objectives and writing the tasks, in three tiers…');
+    setBusyPhases(PHASES.worksheet);
     const r = await fetch('/api/worksheet/generate', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ classId, weekNumber }),
     }).then(r => r.json());
@@ -659,7 +715,7 @@ export default function App() {
    *  worksheet from the bank unchanged, which reuse_count ranks by. */
   async function openWorksheet(worksheetId: string | null, reuse = false) {
     if (!worksheetId) return;
-    setBusy('Fetching the worksheet…');
+    setBusy('Opening it.');
     const r = await fetch(`/api/worksheet/generate?worksheetId=${worksheetId}${reuse ? '&reuse=1' : ''}`).then(r => r.json());
     setBusy(null);
     if (r.url) { window.open(r.url, '_blank'); return; }
@@ -672,7 +728,7 @@ export default function App() {
    *  delivered to the subject's Drive folder. */
   async function doApproveWorksheet(worksheetId: string | null) {
     if (!worksheetId) return;
-    setBusy('Rendering the PDF and sending it to the subject’s Drive folder…');
+    setBusyPhases(PHASES.approve);
     const r = await fetch('/api/worksheet/approve', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ worksheetId }),
     }).then(r => r.json());
@@ -696,7 +752,7 @@ export default function App() {
 
   // ---------- evaluation ------------------------------------------------
   async function doEvaluate() {
-    setBusy('Finding the lessons with no note against them…');
+    setBusy('Let me see which lessons still need a note.');
     const r = await fetch('/api/evaluate').then(r => r.json());
     setBusy(null);
     const lesson = r.outstanding?.[0];
@@ -734,7 +790,7 @@ export default function App() {
       return say(<p className="said">Saved on this device. <b>{queued.length} waiting to sync.</b> Capture never needs a connection - only generation does.</p>);
     }
 
-    setBusy('Formatting it for your planner and tagging the objectives…');
+    setBusyPhases(PHASES.evaluate);
     const r = await fetch('/api/evaluate', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ lessonEntryId, raw }),
@@ -759,7 +815,7 @@ export default function App() {
 
   // ---------- the rest --------------------------------------------------
   async function doBank() {
-    setBusy('Looking in the shared bank…');
+    setBusy('Having a look in the shared bank.');
     const r = await fetch('/api/review?view=bank').then(r => r.json());
     setBusy(null);
     say(<>
@@ -814,7 +870,7 @@ export default function App() {
   /** Open the approved planner's stored PDF. Rendered on approval; this fetches
    *  a fresh signed URL for it. */
   async function openPlannerPdf(plannerId: string) {
-    setBusy('Fetching the PDF…');
+    setBusy('Opening it.');
     const r = await fetch(`/api/pdf/run?plannerId=${plannerId}`).then(r => r.json());
     setBusy(null);
     if (r.url) { window.open(r.url, '_blank'); return; }
@@ -1017,8 +1073,12 @@ export default function App() {
             {turns.map((t, i) => t.who === 'user'
               ? <div key={i} className="turn user"><div className="bub">{t.text}</div></div>
               : <div key={i} className="turn"><img className="crest" src={CREST} alt="" /><div className="body">{t.node}</div></div>)}
-            {busy && <div className="turn"><img className="crest" src={CREST} alt="" />
-              <div className="body"><div className="think"><span className="sp" /><span>{busy}</span></div></div></div>}
+            {saying && <div className="turn"><img className="crest" src={CREST} alt="" />
+              <div className="body"><div className="typing">
+                <p>{saying}</p>
+                <span className="dots" aria-hidden><i /><i /><i /></span>
+                <span className="sr" role="status">{saying}</span>
+              </div></div></div>}
           </div>
         </div>
 
