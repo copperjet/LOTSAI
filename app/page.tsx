@@ -36,12 +36,29 @@ interface Turn { who: 'user' | 'ai'; text?: string; node?: React.ReactNode }
 
 const DAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
+interface ClassWeek {
+  weekNumber: number; weekCommencing: string;
+  status: string | null; signedOff: boolean; topic: string | null;
+}
+interface ClassCal { id: string; name: string; subject_id: string; year_group: string; weeks: ClassWeek[] }
+interface Person { email: string; full_name: string; role: string }
+
+const WHEN = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+const SAYS: Record<string, string> = {
+  draft: 'drafted, not submitted', submitted: 'submitted for review',
+  reviewed: 'reviewed', approved: 'approved', returned: 'returned by your HOD',
+};
+
 export default function App() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [agenda, setAgenda] = useState<AgendaItem[]>([]);
   const [today, setToday] = useState<TodayTask[]>([]);
   const [todayDate, setTodayDate] = useState('');
   const [user, setUser] = useState<{ name: string; role: string } | null>(null);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [me, setMe] = useState('');
   const [spend, setSpend] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
@@ -63,6 +80,11 @@ export default function App() {
   }, []);
 
   useEffect(() => { loadAgenda().then(items => setTurns([{ who: 'ai', node: opening(items) }])); }, [loadAgenda]);
+  useEffect(() => {
+    fetch('/api/whoami').then(r => r.json())
+      .then(r => { setPeople(r.people ?? []); setMe(r.current ?? ''); })
+      .catch(() => {});
+  }, []);
   useEffect(() => { thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: 'smooth' }); }, [turns, busy]);
   useEffect(() => {
     const on = () => setOnline(true), off = () => setOnline(false);
@@ -134,6 +156,9 @@ export default function App() {
     const q = text.toLowerCase();
     const plan = agenda.find(i => i.intent === 'plan');
     if (/cost|spend|price|budget/.test(q)) return doSpend();
+    // Asked before the planner check: "what is next on the calendar" is a
+    // question about the term, not a request to start next week's planner.
+    if (/calendar|term dates|which week|what week|when is week|what.{0,3}s next|whats next/.test(q)) return doCalendar();
     if (/plan|planner|next week/.test(q) && plan) return doMatch(plan.payload as { classId: string; weekNumber: number });
     if (/how did|went|evaluat|period|lesson go/.test(q)) return doEvaluate();
     if (/find|resource|bank|search|shared/.test(q)) return doBank();
@@ -141,6 +166,64 @@ export default function App() {
     if (/registry|conflict|sign.?off/.test(q)) return doRegistry();
     if (/coverage/.test(q)) return doCoverage();
     return boundary();
+  }
+
+  // ---------- calendar and the plan picker ------------------------------
+
+  async function loadCalendar() {
+    setBusy('Reading the school calendar…');
+    const r = await fetch('/api/calendar').then(r => r.json());
+    setBusy(null);
+    return r as {
+      today: string; classes: ClassCal[];
+      weeks: { week_number: number; week_commencing: string; week_type: string }[];
+    };
+  }
+
+  /** What the term does next, and what is already against each week. */
+  async function doCalendar() {
+    const cal = await loadCalendar();
+    const ahead = cal.weeks.filter(w => w.week_commencing >= cal.today).slice(0, 4);
+    if (!ahead.length) return say(<p className="said">The 2026/27 calendar has no weeks left after today.</p>);
+
+    say(<>
+      <p className="said">Here is what the calendar does next. Pick a week to plan it.</p>
+      {ahead.map(w => (
+        <div key={w.week_number} className="c" style={{ padding: '12px 15px', marginTop: 10 }}>
+          <div className="row" style={{ alignItems: 'center', gap: 9 }}>
+            <b style={{ fontSize: 15 }}>Week {w.week_number}</b>
+            <span className="pill grey">w/c {WHEN(w.week_commencing)}</span>
+            {w.week_type !== 'teaching' && <span className="pill">{w.week_type}</span>}
+          </div>
+          {w.week_type === 'teaching' && (
+            <div className="acts" style={{ marginTop: 10 }}>
+              {cal.classes.map(k => {
+                const wk = k.weeks.find(x => x.weekNumber === w.week_number);
+                const label = wk?.status ? `${k.name} — ${SAYS[wk.status] ?? wk.status}`
+                            : !wk?.signedOff ? `${k.name} — registry not signed off`
+                            : `Plan ${k.name}`;
+                return (
+                  <button key={k.id} className="btn" disabled={!wk?.signedOff}
+                          onClick={() => doMatch({ classId: k.id, weekNumber: w.week_number })}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ))}
+    </>);
+  }
+
+  /** The rail's New task: any class, any teaching week — not only the next one. */
+  async function newTask() {
+    const items = await loadAgenda();
+    const cal = await loadCalendar();
+    setTurns([{ who: 'ai', node: opening(items) }]);
+    if (!cal.classes.length) return;
+    say(<PlanPicker classes={cal.classes} today={cal.today}
+                    onPick={(classId, weekNumber) => doMatch({ classId, weekNumber })} />);
   }
 
   // ---------- planner ---------------------------------------------------
@@ -458,7 +541,7 @@ export default function App() {
           <img src={CREST} alt="Lusaka Oaktree School crest" />
           <div><b>LOTS AI</b><small>Lusaka Oaktree</small></div>
         </div>
-        <button className="newbtn" onClick={() => loadAgenda().then(i => setTurns([{ who: 'ai', node: opening(i) }]))}>
+        <button className="newbtn" onClick={newTask}>
           <span>✎</span> New task
         </button>
         <div className="scroll">
@@ -475,6 +558,25 @@ export default function App() {
           </div>
           {user && <div className="acct"><span className="av">{user.name.split(' ').map(s => s[0]).join('')}</span>
             <span className="nm"><b>{user.name}</b><span>{user.role}</span></span></div>}
+          {people.length > 1 && <>
+            <label className="sr" htmlFor="whoami">Signed in as</label>
+            <select id="whoami" className="railsel" value={me}
+                    onChange={async e => {
+                      const email = e.target.value;
+                      setMe(email);
+                      await fetch('/api/whoami', {
+                        method: 'POST', headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ email }),
+                      });
+                      // Everything on screen belongs to the person who just left.
+                      const items = await loadAgenda();
+                      setTurns([{ who: 'ai', node: opening(items) }]);
+                    }}>
+              {people.map(p => (
+                <option key={p.email} value={p.email}>{p.full_name} — {p.role}</option>
+              ))}
+            </select>
+          </>}
         </div>
       </nav>
 
@@ -543,6 +645,54 @@ function Fold({ id, label, children, open, setOpen }: {
  * check off by hand, which is the point: a list you maintain by hand is one more
  * thing owed, and this school already has enough of those.
  */
+/**
+ * Pick a class, then a week. The agenda answers "what is due"; this answers
+ * "I want a different one", which is the question the rail's New task used to
+ * have no answer to.
+ */
+function PlanPicker({ classes, today, onPick }: {
+  classes: ClassCal[]; today: string;
+  onPick: (classId: string, weekNumber: number) => void;
+}) {
+  const [chosen, setChosen] = useState(classes[0]?.id ?? '');
+  const k = classes.find(c => c.id === chosen) ?? classes[0];
+  if (!k) return null;
+
+  // Weeks already behind the school stay reachable — a late planner is still
+  // owed — but the ones ahead come first.
+  const weeks = [...k.weeks].sort((a, b) =>
+    Number(b.weekCommencing >= today) - Number(a.weekCommencing >= today) || a.weekNumber - b.weekNumber);
+
+  return (
+    <>
+      <p className="said">Which class, and which week?</p>
+      <div className="row" style={{ marginTop: 10, gap: 7 }}>
+        {classes.map(c => (
+          <button key={c.id} className={`chip ${c.id === k.id ? 'key' : ''}`} onClick={() => setChosen(c.id)}>
+            {c.name}
+          </button>
+        ))}
+      </div>
+      <div className="opts" style={{ marginTop: 13 }}>
+        {weeks.map(w => {
+          const blocked = !w.signedOff;
+          return (
+            <button key={w.weekNumber} className="opt" disabled={blocked}
+                    style={blocked ? { opacity: .55, cursor: 'not-allowed' } : undefined}
+                    onClick={() => onPick(k.id, w.weekNumber)}>
+              <b>Week {w.weekNumber}</b>
+              <small>w/c {WHEN(w.weekCommencing)}</small>
+              <small>{blocked ? 'Registry not signed off'
+                    : w.status ? (SAYS[w.status] ?? w.status)
+                    : w.topic ? w.topic.slice(0, 48) : 'Not started'}</small>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 function TodayBox({ tasks, date, onPick }: {
   tasks: TodayTask[]; date: string; onPick: (t: TodayTask) => void;
 }) {

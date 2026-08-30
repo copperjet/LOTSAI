@@ -11,7 +11,7 @@ import { useEffect, useRef } from 'react';
  * their system for less motion.
  */
 
-const COUNT = 40;
+const COUNT = 64;
 const MIN_WIDTH = 880;   // where .today and .meter already hide
 const MAX_DPR = 2;       // a 3x phone would cost three times the fill for nothing
 
@@ -53,11 +53,11 @@ export default function Ambience() {
     const dots = Array.from({ length: COUNT }, () => ({
       x: Math.random() * w,
       y: Math.random() * h,
-      r: 1 + Math.random() * 1.5,
+      r: 1.2 + Math.random() * 2,
       // well under a pixel a frame: at 60fps this is a drift, not a movement
       vx: (Math.random() - 0.5) * 0.16,
       vy: (Math.random() - 0.5) * 0.16,
-      a: 0.1 + Math.random() * 0.16,
+      a: 0.16 + Math.random() * 0.24,
     }));
 
     const frame = () => {

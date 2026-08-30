@@ -233,8 +233,11 @@ cost model must not assume a cache discount while `LLM_PROVIDER=openai`.
 ```
 app/
   page.tsx              the chat shell — presentation only
+  Ambience.tsx          the drifting-dot canvas, off below 880px and under reduced motion
   api/
     agenda/             what is outstanding, most urgent first
+    calendar/           every teaching week, and what each class already has against it
+    whoami/             demo user switching, until Google Workspace SSO lands
     plan/match/         search before generate. No model call.
     plan/generate/      create, adapt or reuse, then run the gate
     plan/lesson/        edit one field in place, record it, re-run the gate

@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -28,13 +29,26 @@ export function anon(): SupabaseClient {
   );
 }
 
+/** The cookie the demo user switcher writes. Dies with SSO, like the rest of this. */
+export const DEMO_COOKIE = 'lots_demo_user';
+
 /**
  * Until Google Workspace SSO is switched on, the signed-in user comes from
- * DEMO_USER_EMAIL. Swapping this for the Supabase session is the whole of
- * the auth work — every route already calls it rather than trusting input.
+ * DEMO_USER_EMAIL, or from whoever the rail's switcher last chose. Swapping
+ * this for the Supabase session is the whole of the auth work — every route
+ * already calls it rather than trusting input.
+ *
+ * The switcher is a demo affordance, not a permission model: everyone past the
+ * site password is already the same person, so being able to look at the HOD's
+ * side of the app takes nothing away that was being protected. It goes when
+ * sign-in arrives.
  */
 export async function currentUser(emailOverride?: string) {
-  const email = emailOverride ?? process.env.DEMO_USER_EMAIL;
+  let chosen: string | undefined;
+  if (!emailOverride) {
+    try { chosen = (await cookies()).get(DEMO_COOKIE)?.value; } catch { /* outside a request */ }
+  }
+  const email = emailOverride ?? chosen ?? process.env.DEMO_USER_EMAIL;
   const { data, error } = await admin()
     .from('app_user').select('*').eq('email', email).single();
   if (error) throw new Error(`No app_user for ${email}. Run npm run seed.`);
