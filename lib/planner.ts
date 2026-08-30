@@ -82,10 +82,12 @@ const PLAN_SCHEMA = {
         type: 'object', additionalProperties: false,
         required: ['day_of_week', 'objective_indexes', 'methodology', 'resources', 'differentiation', 'is_recap'],
         properties: {
-          day_of_week: { type: 'integer', minimum: 1, maximum: 5 },
+          // minimum/maximum are not accepted under strict structured output;
+          // the range is enforced after parsing instead.
+          day_of_week: { type: 'integer' },
           // Indexes into the objective list we supplied. The model selects,
           // it never writes objective text.
-          objective_indexes: { type: 'array', items: { type: 'integer', minimum: 0 } },
+          objective_indexes: { type: 'array', items: { type: 'integer' } },
           methodology: { type: 'string' },
           resources: { type: 'string' },
           differentiation: { type: 'string' },
@@ -172,10 +174,13 @@ export async function generatePlan(input: GenerateInput, userId: string) {
 
   const monday = new Date(input.weekCommencing);
   const lessons = data.lessons.map((l, position) => {
-    const d = new Date(monday); d.setDate(monday.getDate() + (l.day_of_week - 1));
+    // Monday to Friday, whatever the model said. The gate checks lesson dates
+    // against the school week, and a day outside it would block the plan.
+    const day = Math.min(5, Math.max(1, Math.round(l.day_of_week)));
+    const d = new Date(monday); d.setDate(monday.getDate() + (day - 1));
     return {
       position,
-      day_of_week: l.day_of_week,
+      day_of_week: day,
       lesson_date: d.toISOString().slice(0, 10),
       // objective text comes from the registry, never from the model
       objectives: l.objective_indexes.map(i => reg.objectives[i]).filter(Boolean),

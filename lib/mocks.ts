@@ -1,5 +1,5 @@
 /**
- * Fixtures for MOCK_CLAUDE=1 (see lib/claude.ts).
+ * Fixtures for MOCK_LLM=1 (see lib/llm.ts).
  *
  * The point is not to fake a plausible-looking demo. It is to exercise every
  * path that a real call exercises — the gate, the metering, the objective

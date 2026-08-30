@@ -23,6 +23,7 @@ Create a project at supabase.com, then in the SQL editor run, in order:
 - `supabase/migrations/0001_init.sql`
 - `supabase/migrations/0002_functions.sql`
 - `supabase/migrations/0003_edits.sql`
+- `supabase/migrations/0004_usage_provider.sql`
 
 ### 3. Keys
 
@@ -34,13 +35,16 @@ Fill in:
 
 | Variable | Where it comes from |
 |---|---|
-| `ANTHROPIC_API_KEY` | console.anthropic.com. Server-side only — it never reaches a browser. |
+| `LLM_PROVIDER` | `openai` or `anthropic`. Defaults to `anthropic` when unset. |
+| `OPENAI_API_KEY` | platform.openai.com. Server-side only — it never reaches a browser. |
+| `ANTHROPIC_API_KEY` | console.anthropic.com. Same rule. Only needed when `LLM_PROVIDER=anthropic`. |
+| `OPENAI_MODEL_SMALL` / `_STANDARD` / `_LARGE` | optional. Override the pinned model for a tier. |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | same page |
 | `SUPABASE_SERVICE_ROLE_KEY` | same page. Used only by route handlers and the seed script. |
 | `DEMO_USER_EMAIL` | who you are signed in as until Google SSO is switched on |
 | `SITE_PASSWORD` | shared password for a deployed site. Unset locally, required in production. |
-| `MOCK_CLAUDE` | set to `1` to run every workflow against fixtures — no key, no cost. See below. |
+| `MOCK_LLM` | set to `1` to run every workflow against fixtures — no key, no cost. See below. `MOCK_CLAUDE` is the old name and still works. |
 
 `.env.local` is gitignored. Do not commit it, and do not paste these keys into a chat.
 
@@ -67,7 +71,7 @@ npm run dev
 Without API credits, run it against fixtures instead:
 
 ```bash
-MOCK_CLAUDE=1 npm run dev
+MOCK_LLM=1 npm run dev
 ```
 
 ---
@@ -174,8 +178,10 @@ the next load; there is no timer.
 
 ### Running without credits
 
-`MOCK_CLAUDE=1` returns fixtures from `lib/mocks.ts` instead of calling the API, and the Anthropic
-client is never constructed, so no key is needed at all. The fixtures are read off the same prompt
+`MOCK_LLM=1` returns fixtures from `lib/mocks.ts` instead of calling the API, and neither provider
+client is constructed, so no key is needed at all. (`MOCK_CLAUDE=1` is the old name for the same
+switch and is still honoured, so a deployment holding production on fixtures does not change
+behaviour mid-rename.) The fixtures are read off the same prompt
 the model would have seen — the period count, the objective indexes and the resource inventory — so
 mock plans satisfy the real gate rather than tripping it, and `planner_create` still answers in
 `objective_indexes` rather than objective text.
@@ -186,20 +192,28 @@ the one thing never exercised.
 
 ### Metering
 
-Every call goes through `lib/claude.ts` and writes a row to `ai_usage`: workflow, model, input
-tokens, cached tokens, output tokens, cost, latency. No estimate goes to the board — the ledger does.
+Every call goes through `lib/llm.ts` and writes a row to `ai_usage`: workflow, provider, model, input
+tokens, cached tokens, output tokens, cost, latency. `cached_tokens` means the same thing on both
+providers — OpenAI folds cache reads into its input count and `lib/providers/openai.ts` subtracts them
+back out, so a cached token is never billed twice. No estimate goes to the board — the ledger does.
 
-Model routing is in one place, `TIER` in `lib/claude.ts`. Raising a tier is a one-line change and the
+Model routing is in one place, `TIER` in `lib/llm.ts`, per provider. Raising a tier is a one-line change and the
 meter will show what it costs.
 
 ### Prompt caching
 
 The registry week and the resource inventory are identical for everyone planning that subject and
-week, so they sit before the cache breakpoint at a 1-hour TTL — the Friday planning window is bursty
-and many teachers hit the same prefix. Class-specific context goes after it.
+week, so they go first: Anthropic gets an explicit breakpoint at a 1-hour TTL, OpenAI gets a stable
+`prompt_cache_key` and 24-hour retention. Either way the Friday planning window is bursty and many
+teachers hit the same prefix. Class-specific context goes after it.
 
-Watch `cache_read_input_tokens` in `ai_usage`. If it is zero across repeated generations, something
+Watch `cached_tokens` in `ai_usage`. If it is zero across repeated generations on Anthropic, something
 volatile has crept above the breakpoint and the cost model is wrong.
+
+On OpenAI it is zero for a different reason, measured rather than assumed: a full CP4 planner prompt
+is around 750 input tokens, and OpenAI only caches prefixes of 1024 tokens or more. Nothing in v1 is
+long enough to cache at all. That is not worth padding a prompt to reach — but it does mean the §D8
+cost model must not assume a cache discount while `LLM_PROVIDER=openai`.
 
 ---
 
@@ -228,17 +242,20 @@ app/
     evaluate/           the lesson evaluation loop
     review/             queue, bank, registry sign-off, coverage
 lib/
-  claude.ts             every model call, routed, cached and metered
+  llm.ts                every model call, routed, cached and metered
+  providers/            anthropic.ts, openai.ts — only what differs per vendor
+  claude.ts             a re-export of llm.ts, so older imports still resolve
   planner.ts            the weekly planner workflow
   evaluation.ts         formatting and objective tagging
   gate.ts               the quality gate, deterministic first
   gateContext.ts        everything the gate needs about a planner, in one place
-  mocks.ts              fixtures for MOCK_CLAUDE=1
+  mocks.ts              fixtures for MOCK_LLM=1
   workkey.ts            the collaborative index
   supabase.ts           two clients: admin (server) and anon (RLS)
 supabase/
   migrations/           schema, RLS, and the derived-read functions
 scripts/
   ingest_overviews.py   the curriculum importer
+  models.mjs            lists the models the OpenAI key can reach, so tiers are pinned from fact
   seed.mjs              loads calendar, people, classes, registry
 ```

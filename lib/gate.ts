@@ -105,7 +105,7 @@ const TONE_SCHEMA = {
   required: ['checks'],
   properties: {
     checks: {
-      type: 'array', maxItems: 3,
+      type: 'array',
       items: {
         type: 'object', additionalProperties: false,
         required: ['id', 'status', 'title', 'detail'],
@@ -139,7 +139,10 @@ export async function modelPass(i: GateInput, userId: string): Promise<Check[]> 
     schema: TONE_SCHEMA as unknown as Record<string, unknown>,
     maxTokens: 1024,
   });
-  return data.checks ?? [];
+  // maxItems is not an accepted keyword under strict structured output, so the
+  // cap that used to be in the schema is enforced here: three warnings is the
+  // most an HOD's two minutes can absorb.
+  return (data.checks ?? []).slice(0, 3);
 }
 
 export async function runGate(i: GateInput, userId: string) {

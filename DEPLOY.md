@@ -12,7 +12,7 @@ five.
 | `lotsai.igaprep.com` | already resolves to Vercel (216.198.79.1 / .65) |
 | Vercel account holding the domain | **not** `copperjets-projects` — that team holds only escholr.com and codarti.com |
 | Supabase project | not created yet |
-| Anthropic credits | not available — deploy runs on `MOCK_CLAUDE=1` |
+| Anthropic credits | not available — the card keeps failing, so the app runs on OpenAI (`LLM_PROVIDER=openai`) |
 
 ## 1. Sign the CLI into the account that owns igaprep.com
 
@@ -37,6 +37,7 @@ At supabase.com, create a project in the region closest to Zambia (`eu-central-1
 - `supabase/migrations/0001_init.sql`
 - `supabase/migrations/0002_functions.sql`
 - `supabase/migrations/0003_edits.sql`
+- `supabase/migrations/0004_usage_provider.sql`
 
 Take three values from **Project Settings → API**: the project URL, the anon key, and the service
 role key.
@@ -62,8 +63,11 @@ Set these for **Production** (and Preview, if previews should work):
 | `SUPABASE_SERVICE_ROLE_KEY` | from Supabase → API. Server-only; never prefixed `NEXT_PUBLIC_`. |
 | `DEMO_USER_EMAIL` | the seeded user every visitor is signed in as, e.g. the teacher account |
 | `SITE_PASSWORD` | the shared password for the whole site. See below. |
-| `MOCK_CLAUDE` | `1` until Anthropic credits clear |
-| `ANTHROPIC_API_KEY` | only once credits clear, at which point unset `MOCK_CLAUDE` |
+| `LLM_PROVIDER` | `openai`. Unset or `anthropic` uses Anthropic. |
+| `OPENAI_API_KEY` | from platform.openai.com. Server-only. |
+| `MOCK_LLM` | `1` to stay on fixtures; unset to make real calls. `MOCK_CLAUDE` is the old name, still honoured. |
+| `ANTHROPIC_API_KEY` | only when switching back to `LLM_PROVIDER=anthropic` |
+| `OPENAI_MODEL_SMALL` / `_STANDARD` / `_LARGE` | optional per-tier overrides |
 
 ```bash
 vercel env add SITE_PASSWORD production
@@ -71,7 +75,8 @@ vercel env add NEXT_PUBLIC_SUPABASE_URL production
 vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production
 vercel env add SUPABASE_SERVICE_ROLE_KEY production
 vercel env add DEMO_USER_EMAIL production
-vercel env add MOCK_CLAUDE production
+vercel env add LLM_PROVIDER production
+vercel env add OPENAI_API_KEY production
 ```
 
 ## 4. Deploy
@@ -124,11 +129,21 @@ The whole mechanism is `middleware.ts`, `lib/sitegate.ts`, `app/gate/page.tsx` a
 4. Signed in, the agenda loads and the today box lists the week's work.
 5. Plan a week, edit a methodology cell, reload: the edit persisted, and `select count(*) from
    edit_event;` in Supabase is 1.
-6. `select workflow, model from ai_usage;` shows `mock` rows — metering is on the path even in mock
-   mode.
+6. `select workflow, provider, model from ai_usage;` shows rows for every call — metering is on the
+   path even in mock mode, where provider and model are both `mock`.
 
 ## Going live on the real API
 
-Set `ANTHROPIC_API_KEY`, remove `MOCK_CLAUDE`, redeploy. Then watch `ai_usage`: if
-`cached_tokens` is zero on a second generation for the same subject and week, the cache prefix has
-drifted and the cost model in Addendum D §D8 no longer holds.
+Set `OPENAI_API_KEY` and `LLM_PROVIDER=openai`, then remove the mock switch and redeploy.
+
+The mock switch was renamed from `MOCK_CLAUDE` to `MOCK_LLM`, and both are honoured. Order matters on
+a site already running on fixtures: add `MOCK_LLM` **first**, deploy, confirm the site still serves
+fixtures, and only then remove `MOCK_CLAUDE`. Removing the old name first would take production from
+fixtures to real API calls in the gap between the two commands.
+
+Then watch `ai_usage`: if `cached_tokens` is zero on a second generation for the same subject and
+week, the cache prefix has drifted and the cost model in Addendum D §D8 no longer holds. The OpenAI
+cache discount is smaller than Anthropic's — correct §D8 from these rows, not from an estimate.
+
+Switching back to Anthropic once the card clears is `LLM_PROVIDER=anthropic` plus
+`ANTHROPIC_API_KEY`. No code changes.

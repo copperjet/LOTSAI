@@ -11,17 +11,31 @@ import type { Objective } from './planner';
  * bank rank by what actually worked.
  */
 
-const SCHEMA = {
-  type: 'object', additionalProperties: false,
-  required: ['formatted_comment', 'landed', 'flagged'],
-  properties: {
-    formatted_comment: { type: 'string' },
-    landed:  { type: 'array', items: { type: 'string' } },
-    flagged: { type: 'array', items: { type: 'string' } },
-    // At most one, and only when the tags genuinely cannot be decided.
-    clarifying_question: { type: 'string' },
-  },
-} as const;
+/**
+ * Built per lesson, because the tags are only meaningful as the references this
+ * lesson actually carries. A small model asked for "the references supplied" in
+ * prose will happily answer with objective text instead; an enum makes that
+ * impossible rather than merely discouraged.
+ *
+ * An uncoded week has no references at all — an empty enum is not valid schema,
+ * so those fall back to plain strings and the filter below empties them.
+ */
+function schemaFor(refs: string[]) {
+  const ref = refs.length ? { type: 'string', enum: refs } : { type: 'string' };
+  return {
+    type: 'object', additionalProperties: false,
+    // Strict structured output requires every property to be listed as required,
+    // so an optional field is expressed as a nullable one instead.
+    required: ['formatted_comment', 'landed', 'flagged', 'clarifying_question'],
+    properties: {
+      formatted_comment: { type: 'string' },
+      landed:  { type: 'array', items: ref },
+      flagged: { type: 'array', items: ref },
+      // At most one, and only when the tags genuinely cannot be decided.
+      clarifying_question: { type: ['string', 'null'] },
+    },
+  };
+}
 
 const SYSTEM = `You turn a Zambian primary teacher's quick spoken note about a lesson into the
 Teacher's Comments box of a Lusaka Oaktree School weekly planner.
@@ -47,7 +61,7 @@ export interface EvaluationResult {
   formatted_comment: string;
   landed: string[];
   flagged: string[];
-  clarifying_question?: string;
+  clarifying_question: string | null;
 }
 
 export async function formatEvaluation(
@@ -71,7 +85,7 @@ export async function formatEvaluation(
       ``,
       `The teacher said: "${raw}"`,
     ].join('\n'),
-    schema: SCHEMA as unknown as Record<string, unknown>,
+    schema: schemaFor(refs) as unknown as Record<string, unknown>,
     maxTokens: 700,
   });
 
