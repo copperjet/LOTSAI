@@ -67,36 +67,23 @@ code{font-family:ui-monospace,'Cascadia Mono',Menlo,monospace;}
   min-height:0;transition:width .18s ease;}
 .rail.mini{width:58px;}
 .rail .top{padding:14px 12px 10px;display:flex;align-items:center;gap:9px;}
-.railtog{margin-left:auto;width:24px;height:24px;border-radius:8px;display:grid;place-items:center;
-  color:var(--muted);font-size:13px;line-height:1;transition:.12s;flex-shrink:0;}
+.tacts{margin-left:auto;display:flex;align-items:center;gap:2px;}
+.railtog{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;
+  color:var(--muted);font-size:14px;line-height:1;transition:.12s;flex-shrink:0;}
 .railtog:hover{background:var(--forest-tint);color:var(--ink);}
-
-/* ---- search ---- */
-.srch{margin:0 12px 10px;display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:12px;
-  border:1px solid var(--line-soft);background:var(--card);transition:.15s;}
-.srch:focus-within{border-color:var(--forest-light);}
-.srch span{color:var(--muted);font-size:14px;line-height:1;}
-.srch input{flex:1;min-width:0;border:0;background:none;color:var(--ink);font:inherit;font-size:13.5px;outline:none;}
-.srch input::placeholder{color:var(--muted);}
-.minisearch{display:none;}
 
 /* ---- collapsed to an icon strip ---- */
 .rail.mini .wordmark,
-.rail.mini .srch,
 .rail.mini .newbtn .lbl,
 .rail.mini .scroll,
 .rail.mini .conn span,
 .rail.mini .acct .nm,
 .rail.mini .railsel,
 .rail.mini .sr{display:none;}
-.rail.mini .top{padding:14px 0 10px;justify-content:center;}
-.rail.mini .railtog{position:absolute;top:14px;left:50%;transform:translateX(-50%);opacity:0;}
-.rail.mini .top:hover .railtog,.rail.mini .railtog:focus-visible{opacity:1;background:var(--card);}
-.rail.mini .top:hover img{opacity:0;}
+.rail.mini .top{flex-direction:column;padding:12px 0 8px;gap:6px;}
+.rail.mini .tacts{margin-left:0;flex-direction:column;gap:4px;}
+.rail.mini .railtog{width:32px;height:32px;border-radius:10px;font-size:15px;}
 .rail.mini .newbtn{margin:4px auto 8px;padding:9px;width:36px;justify-content:center;}
-.rail.mini .minisearch{display:grid;place-items:center;width:36px;height:36px;margin:0 auto;border-radius:12px;
-  border:1px solid var(--line-soft);background:var(--card);color:var(--muted);font-size:15px;transition:.12s;}
-.rail.mini .minisearch:hover{border-color:var(--forest-light);background:var(--forest-tint);color:var(--ink);}
 .rail.mini .foot{padding:10px 0;align-items:center;}
 .rail.mini .conn{justify-content:center;padding:0;}
 .rail.mini .acct{justify-content:center;padding:6px 0;}
@@ -131,7 +118,7 @@ code{font-family:ui-monospace,'Cascadia Mono',Menlo,monospace;}
 .sw.on{background:var(--forest);} .sw.on i{left:17px;}
 
 /* ---- main column ---- */
-.main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--paper);position:relative;}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;background:transparent;position:relative;}
 .mtop{display:flex;align-items:center;gap:10px;padding:11px 20px;border-bottom:1px solid var(--line-soft);}
 .mtop h2{font-size:15px;font-weight:600;flex:1;font-family:var(--body);letter-spacing:0;}
 .mtop .sub2{color:var(--muted);font-weight:400;}
@@ -379,9 +366,9 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
   .rail.open{display:flex;position:fixed;inset:0 auto 0 0;width:270px;z-index:60;box-shadow:var(--shadow);}
   .rail,.rail.mini{width:auto;}
   .rail.open,.rail.mini.open{width:270px;}
-  .rail.mini .wordmark,.rail.mini .srch,.rail.mini .scroll,
+  .rail.mini .wordmark,.rail.mini .scroll,
   .rail.mini .newbtn .lbl,.rail.mini .acct .nm,.rail.mini .railsel{display:revert;}
-  .rail.mini .minisearch{display:none;}
+  .rail.mini .top{flex-direction:row;}
   .railtoggle{display:grid;place-items:center;width:32px;height:32px;border:1px solid var(--line-soft);border-radius:12px;}
   .col,.dockcol{max-width:100%;}
   .opts{grid-template-columns:1fr;}
@@ -390,3 +377,33 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
   .today{display:none;}
   .ambience{display:none;}
 }
+
+/* ================= search palette =================
+   A dialog rather than a field in the rail: search is a thing you go to and
+   leave, and it should not cost the rail 40px of height for the rest of time. */
+.pal{position:fixed;inset:0;z-index:100;display:flex;justify-content:center;align-items:flex-start;
+  padding:12vh 20px 20px;background:rgba(23,41,28,.28);backdrop-filter:blur(2px);}
+.palbox{width:100%;max-width:560px;max-height:70vh;display:flex;flex-direction:column;overflow:hidden;
+  background:var(--card);border:1px solid var(--line-soft);border-radius:18px;box-shadow:var(--shadow);}
+.paltop{display:flex;align-items:center;gap:10px;padding:14px 17px;border-bottom:1px solid var(--line-soft);}
+.paltop span{color:var(--muted);font-size:15px;line-height:1;}
+.paltop input{flex:1;min-width:0;border:0;background:none;color:var(--ink);font:inherit;font-size:15.5px;outline:none;}
+.paltop input::placeholder{color:var(--muted);}
+.palx{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;color:var(--muted);
+  font-size:15px;line-height:1;transition:.12s;}
+.palx:hover{background:var(--sunk);color:var(--ink);}
+.pallist{overflow-y:auto;padding:6px;min-height:0;}
+.palgroup{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);font-weight:700;
+  padding:11px 11px 5px;}
+.palrow{display:flex;align-items:flex-start;gap:11px;width:100%;text-align:left;padding:9px 11px;
+  border-radius:12px;transition:.1s;}
+.palrow:hover,.palrow.on{background:var(--forest-tint);}
+.palrow i{flex-shrink:0;width:22px;height:22px;border-radius:7px;background:var(--sunk);color:var(--muted);
+  display:grid;place-items:center;font-style:normal;font-size:11px;margin-top:1px;}
+.palrow .pw{min-width:0;flex:1;}
+.palrow b{display:block;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.palrow small{display:block;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.palnone{padding:22px 17px;font-size:14px;color:var(--muted);}
+.palfoot{border-top:1px solid var(--line-soft);padding:8px 14px;font-size:11.5px;color:var(--muted);
+  display:flex;gap:14px;}
+@media (max-width:880px){.pal{padding:6vh 12px 12px;}}

@@ -63,9 +63,7 @@ export default function App() {
   const [people, setPeople] = useState<Person[]>([]);
   const [me, setMe] = useState('');
   const [mini, setMini] = useState(false);
-  const [query, setQuery] = useState('');
-  const [hits, setHits] = useState<SearchHits | null>(null);
-  const search = useRef<HTMLInputElement>(null);
+  const [palette, setPalette] = useState(false);
   const [spend, setSpend] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
@@ -100,22 +98,13 @@ export default function App() {
       const typing = document.activeElement instanceof HTMLElement
         && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); toggleRail(); }
-      else if (e.key === '/' && !typing) { e.preventDefault(); setMini(false); search.current?.focus(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette(true); }
+      else if (e.key === '/' && !typing) { e.preventDefault(); setPalette(true); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  // Debounced, because every keystroke would otherwise be a round trip.
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) { setHits(null); return; }
-    const t = setTimeout(() => {
-      fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json())
-        .then(setHits).catch(() => setHits(null));
-    }, 180);
-    return () => clearTimeout(t);
-  }, [query]);
   useEffect(() => { thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: 'smooth' }); }, [turns, busy]);
   useEffect(() => {
     const on = () => setOnline(true), off = () => setOnline(false);
@@ -218,7 +207,7 @@ export default function App() {
   }
 
   function pickHit(h: Hit) {
-    setQuery(''); setHits(null);
+    setPalette(false);
     if (h.kind === 'planner') return doOpen(h.payload.plannerId as string);
     if (h.kind === 'week') {
       const classId = h.payload.classId as string | null;
@@ -626,25 +615,20 @@ export default function App() {
         <div className="top">
           <img src={CREST} alt="Lusaka Oaktree School crest" />
           <div className="wordmark"><b>LOTS AI</b><small>Lusaka Oaktree</small></div>
-          <button className="railtog" onClick={toggleRail} aria-expanded={!mini}
-                  title={`${mini ? 'Expand' : 'Collapse'} the sidebar (Ctrl+B)`}>
-            {mini ? '»' : '«'}
-          </button>
+          <div className="tacts">
+            <button className="railtog" onClick={() => setPalette(true)} title="Search (Ctrl+K)"
+                    aria-label="Search planners, registry weeks and the shared bank">⌕</button>
+            <button className="railtog" onClick={toggleRail} aria-expanded={!mini}
+                    title={`${mini ? 'Expand' : 'Collapse'} the sidebar (Ctrl+B)`}>
+              {mini ? '»' : '«'}
+            </button>
+          </div>
         </div>
         <button className="newbtn" onClick={newTask} title="New task">
           <span>✎</span> <span className="lbl">New task</span>
         </button>
-        <div className="srch">
-          <span aria-hidden>⌕</span>
-          <input ref={search} value={query} placeholder="Search planners and weeks"
-                 aria-label="Search planners, registry weeks and the shared bank"
-                 onChange={e => setQuery(e.target.value)}
-                 onKeyDown={e => { if (e.key === 'Escape') { setQuery(''); e.currentTarget.blur(); } }} />
-        </div>
-        <button className="minisearch" title="Search (/)"
-                onClick={() => { setMini(false); setTimeout(() => search.current?.focus(), 0); }}>⌕</button>
         <div className="scroll">
-          {hits ? <Results hits={hits} onPick={pickHit} /> : agenda.map(i => (
+          {agenda.map(i => (
             <button key={i.id} className="ritem" onClick={() => run(i)} title={i.title}>
               {i.title}<small>{i.note}</small>
             </button>
@@ -678,6 +662,12 @@ export default function App() {
           </>}
         </div>
       </nav>
+
+      {palette && <SearchPalette
+        agenda={agenda}
+        onClose={() => setPalette(false)}
+        onPick={pickHit}
+        onAgenda={i => { setPalette(false); run(i); }} />}
 
       <div className="main">
         <div className="mtop">
@@ -744,28 +734,97 @@ function Fold({ id, label, children, open, setOpen }: {
  * check off by hand, which is the point: a list you maintain by hand is one more
  * thing owed, and this school already has enough of those.
  */
-/** Grouped search results, in the rail, in place of the agenda. */
-function Results({ hits, onPick }: { hits: SearchHits; onPick: (h: Hit) => void }) {
-  const groups: [string, Hit[]][] = [
-    ['Your planners', hits.planners],
-    ['Registry weeks', hits.weeks],
-    ['Shared bank', hits.bank],
-  ];
-  const total = groups.reduce((n, [, g]) => n + g.length, 0);
-  if (!total) return <p className="rgroup" style={{ textTransform: 'none', letterSpacing: 0 }}>Nothing matches.</p>;
+/**
+ * Search, as a dialog you open and leave.
+ *
+ * Three things are worth finding — a planner you already have, a week in the
+ * registry, and somebody's approved work — and the empty state offers what is
+ * already outstanding rather than a blank box demanding a query
+ * (Addendum D section D5.1).
+ */
+function SearchPalette({ agenda, onClose, onPick, onAgenda }: {
+  agenda: AgendaItem[];
+  onClose: () => void;
+  onPick: (h: Hit) => void;
+  onAgenda: (i: AgendaItem) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState<SearchHits | null>(null);
+  const [cursor, setCursor] = useState(0);
+  const box = useRef<HTMLInputElement>(null);
 
-  return <>
-    {groups.filter(([, g]) => g.length).map(([name, g]) => (
-      <div key={name}>
-        <div className="rgroup">{name}</div>
-        {g.map(h => (
-          <button key={h.kind + h.id} className="ritem" onClick={() => onPick(h)} title={h.label}>
-            {h.label}<small>{h.note}</small>
-          </button>
-        ))}
+  useEffect(() => { box.current?.focus(); }, []);
+
+  // Debounced, because every keystroke would otherwise be a round trip.
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) { setHits(null); return; }
+    const t = setTimeout(() => {
+      fetch(`/api/search?q=${encodeURIComponent(term)}`).then(r => r.json())
+        .then(h => { setHits(h); setCursor(0); }).catch(() => setHits(null));
+    }, 180);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const groups: [string, string, Hit[]][] = hits
+    ? [['Your planners', '▤', hits.planners], ['Registry weeks', '▦', hits.weeks], ['Shared bank', '◈', hits.bank]]
+    : [];
+  const flat = groups.flatMap(([, , g]) => g);
+
+  const go = (n: number) => setCursor(c => Math.max(0, Math.min(flat.length - 1, c + n)));
+
+  return (
+    <div className="pal" role="dialog" aria-modal="true" aria-label="Search"
+         onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="palbox">
+        <div className="paltop">
+          <span aria-hidden>⌕</span>
+          <input ref={box} value={q} placeholder="Search planners, weeks and the shared bank"
+                 onChange={e => setQ(e.target.value)}
+                 onKeyDown={e => {
+                   if (e.key === 'Escape') onClose();
+                   else if (e.key === 'ArrowDown') { e.preventDefault(); go(1); }
+                   else if (e.key === 'ArrowUp') { e.preventDefault(); go(-1); }
+                   else if (e.key === 'Enter' && flat[cursor]) onPick(flat[cursor]);
+                 }} />
+          <button className="palx" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="pallist">
+          {!hits && (
+            <>
+              <div className="palgroup">Outstanding</div>
+              {agenda.map(i => (
+                <button key={i.id} className="palrow" onClick={() => onAgenda(i)}>
+                  <i aria-hidden>▤</i>
+                  <span className="pw"><b>{i.title}</b><small>{i.note}</small></span>
+                </button>
+              ))}
+            </>
+          )}
+
+          {hits && !flat.length && <p className="palnone">Nothing matches “{q.trim()}”.</p>}
+
+          {groups.filter(([, , g]) => g.length).map(([name, icon, g]) => (
+            <div key={name}>
+              <div className="palgroup">{name}</div>
+              {g.map(h => (
+                <button key={h.kind + h.id}
+                        className={`palrow ${flat.indexOf(h) === cursor ? 'on' : ''}`}
+                        onMouseEnter={() => setCursor(flat.indexOf(h))}
+                        onClick={() => onPick(h)}>
+                  <i aria-hidden>{icon}</i>
+                  <span className="pw"><b>{h.label}</b><small>{h.note}</small></span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="palfoot"><span>↑↓ to move</span><span>↵ to open</span><span>esc to close</span></div>
       </div>
-    ))}
-  </>;
+    </div>
+  );
 }
 
 /**

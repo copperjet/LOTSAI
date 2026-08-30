@@ -16,17 +16,17 @@ import { useEffect, useRef } from 'react';
  */
 
 const SPACING = 26;      // px between dots
-const SIZE = 1.6;        // px per dot, drawn as a square
+const SIZE = 2;          // px per dot, drawn as a square
 const MIN_WIDTH = 880;   // where .today and .meter already hide
 const MAX_DPR = 2;       // a 3x phone would cost three times the fill for nothing
 const FPS = 30;          // the motion is slow; 60 buys nothing and costs double
 
-const FLOOR = 0.05;      // resting opacity, so the grid reads as texture
-const PEAK = 0.38;       // brightest a dot gets as a ring passes through it
+const FLOOR = 0.11;      // resting opacity, so the grid reads as texture
+const PEAK = 0.5;        // brightest a dot gets as a ring passes through it
 const BAND = 90;         // px — how wide the travelling band is
 const SPEED = 0.16;      // px per ms
-const EVERY = 4500;      // ms between rings
-const MAX_RINGS = 2;
+const EVERY = 3200;      // ms between rings
+const MAX_RINGS = 3;
 
 export default function Ambience() {
   const ref = useRef<HTMLCanvasElement>(null);
