@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
 import { workKey } from '@/lib/workkey';
+import * as engine from '@/lib/engine';
+import { storeArtefact } from '@/lib/pdf/store';
 
 export const runtime = 'nodejs';
 
@@ -88,5 +90,14 @@ export async function PUT(req: NextRequest) {
   });
 
   await audit(user.id, 'plan.approve', 'planner', plannerId);
-  return NextResponse.json({ ok: true, status: 'approved' });
+
+  // Render the approved planner to a PDF on the LOTS template and store it. This
+  // is a rendering of the records (main spec §4), so it runs after the artefact is
+  // already banked and never blocks approval if it fails (storeArtefact swallows).
+  const workflow = await engine.resolveWorkflow('weekly_planner');
+  const render = workflow.render?.on === 'approved' && workflow.standard.renderer_id
+    ? await storeArtefact(workflow.standard, plannerId)
+    : null;
+
+  return NextResponse.json({ ok: true, status: 'approved', render });
 }

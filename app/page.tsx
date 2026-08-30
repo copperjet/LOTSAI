@@ -46,6 +46,29 @@ interface Person { email: string; full_name: string; role: string }
 interface Hit { id: string; label: string; note: string; kind: string; payload: Record<string, unknown> }
 interface SearchHits { planners: Hit[]; weeks: Hit[]; bank: Hit[] }
 
+interface PackSpan { classId: string; weekFrom: number; weekTo: number }
+interface PackMatch {
+  id: string; title: string; objective_refs: string[]; week_from: number; week_to: number;
+  reuse_count: number; app_user?: { full_name: string } | null;
+}
+interface PackResult {
+  studyPackId: string | null; title: string;
+  units: { label: string; topics: number }[]; refs: string[]; glossary: number;
+  fromUpload?: { filename: string; resolved: number; unresolved: string[] };
+}
+interface UploadResult {
+  uploadId: string; filename: string; textLength: number;
+  refsFound: string[]; resolved: { ref: string; text: string; week_number: number }[];
+  unresolved: string[]; note: string;
+}
+interface WorksheetResult {
+  worksheetId: string | null; title: string; tasks: number; refs: string[];
+}
+interface WorksheetMatch {
+  id: string; title: string; objective_refs: string[]; week_number: number;
+  reuse_count: number; app_user?: { full_name: string } | null;
+}
+
 const WHEN = (iso: string) =>
   new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
@@ -179,6 +202,9 @@ export default function App() {
     // Asked before the planner check: "what is next on the calendar" is a
     // question about the term, not a request to start next week's planner.
     if (/calendar|term dates|which week|what week|when is week|what.{0,3}s next|whats next/.test(q)) return doCalendar();
+    if (/worksheet|work sheet|task sheet|differentiat/.test(q)) return doWorksheet();
+    if (/upload|turn.*(pdf|file|document)|from a (pdf|file|document)/.test(q)) return doPackFromUpload();
+    if (/study.?pack|revision|revise/.test(q)) return doStudyPack();
     if (/plan|planner|next week/.test(q) && plan) return doMatch(plan.payload as { classId: string; weekNumber: number });
     if (/how did|went|evaluat|period|lesson go/.test(q)) return doEvaluate();
     if (/find|resource|bank|search|shared/.test(q)) return doBank();
@@ -397,6 +423,293 @@ export default function App() {
     return true;
   }
 
+  // ---------- study packs -----------------------------------------------
+  /** The front door: pick a class and a span of signed-off weeks. */
+  async function doStudyPack() {
+    const cal = await loadCalendar();
+    if (!cal.classes.length) return say(<p className="said">You have no classes to build a pack for.</p>);
+    say(<StudyPackPicker classes={cal.classes} today={cal.today}
+                         onPick={(classId, weekFrom, weekTo) => doPackMatch({ classId, weekFrom, weekTo })}
+                         onUpload={doPackFromUpload} />);
+  }
+
+  /** Search before generate. An approved pack for the same objectives is offered
+   *  to open unchanged; otherwise the only path is to build one. */
+  async function doPackMatch(p: PackSpan) {
+    setBusy('Checking the registry, then the shared bank…');
+    const r = await fetch('/api/studypack/match', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(p),
+    }).then(r => r.json());
+    setBusy(null);
+
+    if (r.blocked) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message}</p></div>);
+
+    if (r.uncoded) {
+      return say(<>
+        <p className="said">
+          Weeks {p.weekFrom}–{p.weekTo} are stated in prose with no syllabus references. I will not invent
+          codes, so I cannot match this against anyone else&rsquo;s pack — I can still build one.
+        </p>
+        <div className="acts">
+          <button className="btn primary" onClick={() => doPackGenerate(p)}>Build it anyway</button>
+        </div>
+      </>);
+    }
+
+    const refs = (r.refs ?? []) as string[];
+    const objectives = `${refs.length} objective${refs.length === 1 ? '' : 's'}`;
+
+    const best = r.matches?.[0] as PackMatch | undefined;
+    if (!best) {
+      return say(<>
+        <p className="said">
+          Weeks {p.weekFrom}–{p.weekTo} cover {objectives}. Nobody has built a study pack for them yet —
+          you are first.
+        </p>
+        <div className="row" style={{ gap: 5, marginTop: 8 }}>
+          {refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+        </div>
+        <div className="acts" style={{ marginTop: 12 }}>
+          <button className="btn primary" onClick={() => doPackGenerate(p)}>Build it</button>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about ${r.costs.create.toFixed(3)}</span>
+        </div>
+      </>);
+    }
+
+    say(<>
+      <p className="said">
+        Weeks {p.weekFrom}–{p.weekTo} cover {objectives}. Somebody has already built an approved pack for
+        the same objectives.
+      </p>
+      <div className="match">
+        <h3 style={{ fontSize: 18 }}>{best.title}</h3>
+        <div className="row" style={{ marginTop: 10 }}>
+          {best.objective_refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+          <span className="pill grey">reused {best.reuse_count}×</span>
+          {best.app_user?.full_name && <span className="pill grey">by {best.app_user.full_name}</span>}
+        </div>
+        <div className="acts" style={{ marginTop: 15 }}>
+          <button className="btn primary" onClick={() => openPack(best.id, true)}>Open it, unchanged</button>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>free — no AI call</span>
+        </div>
+        <div className="acts" style={{ marginTop: 10 }}>
+          <button className="quiet" onClick={() => doPackGenerate(p)}>Build a new one instead</button>
+        </div>
+      </div>
+    </>);
+  }
+
+  async function doPackGenerate(p: PackSpan) {
+    setBusy('Pulling the objectives from the registry and writing the pack…');
+    const r = await fetch('/api/studypack/generate', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(p),
+    }).then(r => r.json());
+    setBusy(null);
+    if (r.error) return say(<div className="bound"><p>{r.error}</p></div>);
+    meter(r.usage);
+    say(<PackCard r={r as PackResult} onOpen={() => openPack(r.studyPackId)}
+                  onPdf={() => openPackPdf(r.studyPackId)}
+                  onApprove={() => doApprovePack(r.studyPackId)} />);
+  }
+
+  /** Open a stored pack's HTML. `reuse` marks opening an approved pack from the
+   *  bank unchanged, which is what the bank's reuse_count ranks by. */
+  async function openPack(studyPackId: string | null, reuse = false) {
+    if (!studyPackId) return;
+    setBusy('Fetching the pack…');
+    const r = await fetch(`/api/studypack/generate?studyPackId=${studyPackId}${reuse ? '&reuse=1' : ''}`).then(r => r.json());
+    setBusy(null);
+    if (r.url) { window.open(r.url, '_blank'); return; }
+    say(<div className="bound"><p style={{ fontSize: 14 }}>
+      The pack is saved, but its interactive HTML has not rendered yet. Try again in a moment.
+    </p></div>);
+  }
+
+  /** The printable companion — rendered on demand, since most packs stay on screen. */
+  async function openPackPdf(studyPackId: string | null) {
+    if (!studyPackId) return;
+    setBusy('Laying out the printable PDF, with the answer key at the end…');
+    const r = await fetch('/api/studypack/pdf', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ studyPackId }),
+    }).then(r => r.json());
+    setBusy(null);
+    if (r.url) { window.open(r.url, '_blank'); return; }
+    say(<div className="bound"><p style={{ fontSize: 14 }}>
+      The printable PDF could not be rendered. {r.error ? `(${r.error})` : ''} Try again in a moment.
+    </p></div>);
+  }
+
+  /** Teacher approves the pack they built: it enters the shared bank and its
+   *  printable PDF is delivered to the subject's Drive folder. */
+  async function doApprovePack(studyPackId: string | null) {
+    if (!studyPackId) return;
+    setBusy('Rendering the PDF and sending it to the subject’s Drive folder…');
+    const r = await fetch('/api/studypack/approve', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ studyPackId }),
+    }).then(r => r.json());
+    setBusy(null);
+    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message ?? r.error}</p></div>);
+    const d = r.drive ?? {};
+    say(<>
+      <p className="said">
+        Approved. It is in the shared bank now, and the printable PDF has gone to the subject&rsquo;s
+        Drive folder.
+      </p>
+      {d.link && (
+        <div className="acts">
+          <a className="btn" href={d.link} target="_blank" rel="noreferrer">Open it in Drive</a>
+        </div>
+      )}
+      {d.mock && (
+        <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          Drive is in demo mode — no file was actually uploaded. Set the Google service-account credential
+          and folder mapping to go live.
+        </p>
+      )}
+    </>);
+    loadAgenda();
+  }
+
+  /** The other door: a file the teacher already has. It is reconciled against the
+   *  registry first — only the objectives the school's curriculum holds seed a pack. */
+  async function doPackFromUpload() {
+    const cal = await loadCalendar();
+    if (!cal.classes.length) return say(<p className="said">You have no classes to reconcile a file against.</p>);
+    say(<UploadCard classes={cal.classes} onBuild={doBuildFromUpload} />);
+  }
+
+  async function doBuildFromUpload(uploadId: string) {
+    setBusy('Reading the resolved objectives and writing the pack…');
+    const r = await fetch('/api/studypack/from-upload', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ uploadId }),
+    }).then(r => r.json());
+    setBusy(null);
+    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message ?? r.error}</p></div>);
+    meter(r.usage);
+    say(<PackCard r={r as PackResult} onOpen={() => openPack(r.studyPackId)}
+                  onPdf={() => openPackPdf(r.studyPackId)}
+                  onApprove={() => doApprovePack(r.studyPackId)} />);
+  }
+
+  // ---------- worksheets ------------------------------------------------
+  /** Pick a class and a signed-off week, then generate a differentiated worksheet. */
+  async function doWorksheet() {
+    const cal = await loadCalendar();
+    if (!cal.classes.length) return say(<p className="said">You have no classes to build a worksheet for.</p>);
+    say(<WorksheetPicker classes={cal.classes}
+                         onPick={(classId, weekNumber) => doWorksheetMatch(classId, weekNumber)} />);
+  }
+
+  /** Search before generate: offer an approved worksheet for the same objectives
+   *  to reuse, otherwise build one. */
+  async function doWorksheetMatch(classId: string, weekNumber: number) {
+    setBusy('Checking the registry, then the shared bank…');
+    const r = await fetch('/api/worksheet/match', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ classId, weekNumber }),
+    }).then(r => r.json());
+    setBusy(null);
+
+    if (r.blocked) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message}</p></div>);
+
+    const refs = (r.refs ?? []) as string[];
+    const best = r.matches?.[0] as WorksheetMatch | undefined;
+    if (!best) {
+      return say(<>
+        <p className="said">
+          Week {weekNumber} covers {refs.length} objective{refs.length === 1 ? '' : 's'}. Nobody has an
+          approved worksheet for them yet — you are first.
+        </p>
+        <div className="row" style={{ gap: 5, marginTop: 8 }}>
+          {refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+        </div>
+        <div className="acts" style={{ marginTop: 12 }}>
+          <button className="btn primary" onClick={() => doWorksheetGenerate(classId, weekNumber)}>Build it</button>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about ${r.costs.create.toFixed(3)}</span>
+        </div>
+      </>);
+    }
+
+    say(<>
+      <p className="said">
+        Week {weekNumber} covers {refs.length} objective{refs.length === 1 ? '' : 's'}. Somebody has
+        already had an approved worksheet for the same objectives.
+      </p>
+      <div className="match">
+        <h3 style={{ fontSize: 18 }}>{best.title}</h3>
+        <div className="row" style={{ marginTop: 10 }}>
+          {best.objective_refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+          <span className="pill grey">reused {best.reuse_count}×</span>
+          {best.app_user?.full_name && <span className="pill grey">by {best.app_user.full_name}</span>}
+        </div>
+        <div className="acts" style={{ marginTop: 15 }}>
+          <button className="btn primary" onClick={() => openWorksheet(best.id, true)}>Open it, unchanged</button>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>free — no AI call</span>
+        </div>
+        <div className="acts" style={{ marginTop: 10 }}>
+          <button className="quiet" onClick={() => doWorksheetGenerate(classId, weekNumber)}>Build a new one instead</button>
+        </div>
+      </div>
+    </>);
+  }
+
+  async function doWorksheetGenerate(classId: string, weekNumber: number) {
+    setBusy('Pulling the week’s objectives and writing the tasks, in three tiers…');
+    const r = await fetch('/api/worksheet/generate', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ classId, weekNumber }),
+    }).then(r => r.json());
+    setBusy(null);
+    if (r.blocked) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message}</p></div>);
+    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.error}</p></div>);
+    meter(r.usage);
+    say(<WorksheetCard r={r as WorksheetResult}
+                       onOpen={() => openWorksheet(r.worksheetId)}
+                       onApprove={() => doApproveWorksheet(r.worksheetId)} />);
+  }
+
+  /** Open the worksheet's printable PDF. `reuse` marks opening an approved
+   *  worksheet from the bank unchanged, which reuse_count ranks by. */
+  async function openWorksheet(worksheetId: string | null, reuse = false) {
+    if (!worksheetId) return;
+    setBusy('Fetching the worksheet…');
+    const r = await fetch(`/api/worksheet/generate?worksheetId=${worksheetId}${reuse ? '&reuse=1' : ''}`).then(r => r.json());
+    setBusy(null);
+    if (r.url) { window.open(r.url, '_blank'); return; }
+    say(<div className="bound"><p style={{ fontSize: 14 }}>
+      The worksheet is saved, but its PDF has not rendered yet. Try again in a moment.
+    </p></div>);
+  }
+
+  /** Teacher approves the worksheet: it enters the shared bank and its PDF is
+   *  delivered to the subject's Drive folder. */
+  async function doApproveWorksheet(worksheetId: string | null) {
+    if (!worksheetId) return;
+    setBusy('Rendering the PDF and sending it to the subject’s Drive folder…');
+    const r = await fetch('/api/worksheet/approve', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ worksheetId }),
+    }).then(r => r.json());
+    setBusy(null);
+    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message ?? r.error}</p></div>);
+    const d = r.drive ?? {};
+    say(<>
+      <p className="said">
+        Approved. It is in the shared bank now, and the worksheet PDF has gone to the subject&rsquo;s
+        Drive folder.
+      </p>
+      {d.link && (
+        <div className="acts">
+          <a className="btn" href={d.link} target="_blank" rel="noreferrer">Open it in Drive</a>
+        </div>
+      )}
+      {d.mock && (
+        <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          Drive is in demo mode — no file was actually uploaded. Set the Google service-account credential
+          and folder mapping to go live.
+        </p>
+      )}
+    </>);
+    loadAgenda();
+  }
+
   // ---------- evaluation ------------------------------------------------
   async function doEvaluate() {
     setBusy('Finding the lessons with no note against them…');
@@ -505,21 +818,49 @@ export default function App() {
     await fetch('/api/plan/submit', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ plannerId, decision, comment }),
-    });
-    say(<p className="said">{decision === 'approved'
-      ? 'Approved, and added to the bank where the rest of the year group can find it.'
-      : 'Returned to the teacher, with your comment attached to it.'}</p>);
+    }).then(r => r.json()).catch(() => null);
+    if (decision === 'approved') {
+      say(<>
+        <p className="said">Approved, and added to the bank where the rest of the year group can find it.</p>
+        <div className="acts">
+          <button className="btn" onClick={() => openPlannerPdf(plannerId)}>Open the PDF</button>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>rendered on the school template</span>
+        </div>
+      </>);
+    } else {
+      say(<p className="said">Returned to the teacher, with your comment attached to it.</p>);
+    }
     loadAgenda();
+  }
+
+  /** Open the approved planner's stored PDF. Rendered on approval; this fetches
+   *  a fresh signed URL for it. */
+  async function openPlannerPdf(plannerId: string) {
+    setBusy('Fetching the PDF…');
+    const r = await fetch(`/api/pdf/run?plannerId=${plannerId}`).then(r => r.json());
+    setBusy(null);
+    if (r.url) { window.open(r.url, '_blank'); return; }
+    say(<div className="bound"><p style={{ fontSize: 14 }}>
+      The PDF has not rendered yet. It renders on approval — try again in a moment.
+    </p></div>);
   }
 
   async function doRegistry() {
     const r = await fetch('/api/review?view=registry').then(r => r.json());
+    type Gap = { id: string; kind: string; year_group: string | null; subject: string | null;
+                 semester: number | null; detail: string; files: string[]; resolved_file: string | null };
+    const gaps: Gap[] = r.gaps ?? [];
+    const conflicts = gaps.filter(g => g.kind === 'conflict');
+    const unreadable = gaps.filter(g => g.kind === 'unreadable');
+    const unplaced = gaps.filter(g => g.kind === 'unclassified');
+
     say(<>
       <p className="said">
         {r.blocked?.length
-          ? <>{r.blocked.length} subject{r.blocked.length === 1 ? '' : 's'} cannot be planned yet. I will not guess which file is current, and I will not invent a syllabus code.</>
-          : <>Everything is signed off.</>}
+          ? <>{r.blocked.length} imported subject{r.blocked.length === 1 ? '' : 's'} cannot be planned yet. I will not guess which file is current, and I will not invent a syllabus code.</>
+          : <>Everything imported is signed off.</>}
       </p>
+
       {(r.blocked ?? []).map((b: { year_group: string; subject_id: string; weeks: number; uncoded: number; source: string }) => (
         <div key={`${b.year_group}-${b.subject_id}`} className="c pad">
           <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -532,6 +873,40 @@ export default function App() {
           </p>
         </div>
       ))}
+
+      {/* Before generation is even possible: files that never became weeks.
+          A conflict needs a decision; the rest need a look. Detail folds away. */}
+      {conflicts.length > 0 && (
+        <div className="c pad">
+          <b>{conflicts.length} conflict{conflicts.length === 1 ? '' : 's'} need a decision</b>
+          <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
+            Two files claim the same subject and semester. Say which is current and re-run the
+            import — it will not guess.
+          </p>
+          {conflicts.map(g => (
+            <details key={g.id} style={{ marginTop: 10 }}>
+              <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>
+                {g.year_group} {g.subject} {g.semester ? `· S${g.semester}` : ''}
+              </summary>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, color: 'var(--muted)' }}>
+                {g.files.map(f => <li key={f}><code>{f}</code></li>)}
+              </ul>
+            </details>
+          ))}
+        </div>
+      )}
+
+      {(unreadable.length > 0 || unplaced.length > 0) && (
+        <details className="c pad">
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+            {unreadable.length} unreadable · {unplaced.length} unplaced file{unplaced.length === 1 ? '' : 's'}
+          </summary>
+          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '8px 0 0' }}>
+            These carry no signed-off weeks yet. Unreadable: matched to a subject but no week table
+            was found. Unplaced: the filename did not say which subject or year it belongs to.
+          </p>
+        </details>
+      )}
     </>);
   }
 
@@ -604,9 +979,10 @@ export default function App() {
     const lead = agenda[0];
     const pool = user?.role === 'hod'
       ? ['Show me what needs reviewing', 'Registry conflicts', 'Coverage']
-      : ['Plan next week', 'How did today go?', 'Find a resource'];
+      : ['Plan next week', 'Make a worksheet', 'Make a study pack', 'How did today go?'];
     const first = lead?.act ?? pool[0];
-    return [first, ...pool.filter(p => p !== first)].slice(0, 3);
+    const max = user?.role === 'hod' ? 3 : 4;
+    return [first, ...pool.filter(p => p !== first)].slice(0, max);
   })();
 
   return (
@@ -871,6 +1247,292 @@ function PlanPicker({ classes, today, onPick }: {
           );
         })}
       </div>
+    </>
+  );
+}
+
+/**
+ * Pick a class, then a span of weeks, for a study pack. A pack covers a run of
+ * weeks rather than one, so this asks for a start and an end — over the same
+ * signed-off teaching weeks the planner picker offers.
+ */
+function StudyPackPicker({ classes, today, onPick, onUpload }: {
+  classes: ClassCal[]; today: string;
+  onPick: (classId: string, weekFrom: number, weekTo: number) => void;
+  onUpload: () => void;
+}) {
+  const [chosen, setChosen] = useState(classes[0]?.id ?? '');
+  const k = classes.find(c => c.id === chosen) ?? classes[0];
+
+  // Only signed-off teaching weeks can seed a pack (Addendum C §C7).
+  const weeks = k ? k.weeks.filter(w => w.signedOff).sort((a, b) => a.weekNumber - b.weekNumber) : [];
+  const [from, setFrom] = useState<number | null>(null);
+  const [to, setTo] = useState<number | null>(null);
+
+  // Reset the span whenever the class changes — its signed-off weeks differ.
+  useEffect(() => { setFrom(null); setTo(null); }, [chosen]);
+
+  if (!k) return null;
+
+  const ready = from != null && to != null && to >= from;
+
+  return (
+    <>
+      <p className="said">
+        Which class, and which weeks should the pack cover?
+        {' '}<button className="linkish" onClick={onUpload}
+              style={{ background: 'none', border: 'none', padding: 0, color: 'var(--muted)',
+                       textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}>
+          Or turn a file into one.
+        </button>
+      </p>
+      <div className="row" style={{ marginTop: 10, gap: 7 }}>
+        {classes.map(c => (
+          <button key={c.id} className={`chip ${c.id === k.id ? 'key' : ''}`} onClick={() => setChosen(c.id)}>
+            {c.name}
+          </button>
+        ))}
+      </div>
+
+      {!weeks.length ? (
+        <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 12 }}>
+          None of this class&rsquo;s weeks are signed off yet, so there is nothing to build from.
+        </p>
+      ) : (
+        <>
+          <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '13px 0 6px' }}>
+            {from == null ? 'Pick the first week.' : 'Now pick the last week.'}
+          </p>
+          <div className="opts">
+            {weeks.map(w => {
+              const inSpan = from != null && to != null && w.weekNumber >= from && w.weekNumber <= to;
+              const isFrom = w.weekNumber === from;
+              const active = isFrom || inSpan;
+              return (
+                <button key={w.weekNumber} className={`opt ${active ? 'on' : ''}`}
+                        style={active ? { borderColor: 'var(--brand, currentColor)' } : undefined}
+                        onClick={() => {
+                          // First click sets the start; second sets the end.
+                          if (from == null || to != null) { setFrom(w.weekNumber); setTo(null); }
+                          else if (w.weekNumber < from) { setTo(from); setFrom(w.weekNumber); }
+                          else setTo(w.weekNumber);
+                        }}>
+                  <b>Week {w.weekNumber}</b>
+                  <small>w/c {WHEN(w.weekCommencing)}</small>
+                  <small>{w.topic ? w.topic.slice(0, 48) : 'Signed off'}</small>
+                </button>
+              );
+            })}
+          </div>
+          <div className="acts" style={{ marginTop: 13 }}>
+            <button className="btn primary" disabled={!ready}
+                    onClick={() => ready && onPick(k.id, from!, to!)}>
+              {ready ? `Find or build weeks ${from}–${to}` : 'Pick a start and end week'}
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * The generated pack, summarised. Objectives come from the registry; the pedagogy
+ * is the model's. A pack enters the shared bank only once a reviewer approves it.
+ */
+function PackCard({ r, onOpen, onPdf, onApprove }: {
+  r: PackResult; onOpen: () => void; onPdf: () => void; onApprove: () => void;
+}) {
+  return (
+    <>
+      <p className="said">
+        Built. <b>{r.title}</b> — objectives are copied from the registry, the key ideas, quizzes and
+        glossary are written for the age group.
+      </p>
+      <div className="c pad">
+        <div className="eyebrow" style={{ marginBottom: 6 }}>What is in it</div>
+        <ul style={{ margin: '0 0 10px', paddingLeft: 18, fontSize: 13.5 }}>
+          {r.units.map((u, i) => (
+            <li key={i}>{u.label} — {u.topics} topic{u.topics === 1 ? '' : 's'}</li>
+          ))}
+        </ul>
+        <div className="row" style={{ gap: 5 }}>
+          {r.refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+          <span className="pill grey">{r.glossary} glossary term{r.glossary === 1 ? '' : 's'}</span>
+        </div>
+      </div>
+      <div className="acts" style={{ marginTop: 12 }}>
+        <button className="btn primary" onClick={onApprove}>Approve &amp; send to Drive</button>
+        <button className="btn" onClick={onOpen}>Open the study pack</button>
+        <button className="btn" onClick={onPdf}>Download printable PDF</button>
+      </div>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+        Open it to check it first. Approving puts it in the shared bank and sends the printable PDF to
+        your subject&rsquo;s Drive folder. The interactive pack is for the screen; the PDF is the paper
+        version, with a tear-off answer key.
+      </p>
+    </>
+  );
+}
+
+/**
+ * Pick a class, then one signed-off week, for a worksheet. A worksheet covers a
+ * single week (its differentiation is the three tiers, not a span of weeks), so
+ * this asks for one week rather than a range.
+ */
+function WorksheetPicker({ classes, onPick }: {
+  classes: ClassCal[]; onPick: (classId: string, weekNumber: number) => void;
+}) {
+  const [chosen, setChosen] = useState(classes[0]?.id ?? '');
+  const k = classes.find(c => c.id === chosen) ?? classes[0];
+  const weeks = k ? k.weeks.filter(w => w.signedOff).sort((a, b) => a.weekNumber - b.weekNumber) : [];
+
+  if (!k) return null;
+
+  return (
+    <>
+      <p className="said">Which class, and which week&rsquo;s objectives should the worksheet cover?</p>
+      <div className="row" style={{ marginTop: 10, gap: 7 }}>
+        {classes.map(c => (
+          <button key={c.id} className={`chip ${c.id === k.id ? 'key' : ''}`} onClick={() => setChosen(c.id)}>
+            {c.name}
+          </button>
+        ))}
+      </div>
+      {!weeks.length ? (
+        <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 12 }}>
+          None of this class&rsquo;s weeks are signed off yet, so there is nothing to build from.
+        </p>
+      ) : (
+        <div className="opts" style={{ marginTop: 13 }}>
+          {weeks.map(w => (
+            <button key={w.weekNumber} className="opt" onClick={() => onPick(k.id, w.weekNumber)}>
+              <b>Week {w.weekNumber}</b>
+              <small>w/c {WHEN(w.weekCommencing)}</small>
+              <small>{w.topic ? w.topic.slice(0, 48) : 'Signed off'}</small>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * The generated worksheet, summarised. Objectives come from the registry; the
+ * tasks and their three tiers are the model's. Approving delivers the PDF to Drive.
+ */
+function WorksheetCard({ r, onOpen, onApprove }: {
+  r: WorksheetResult; onOpen: () => void; onApprove: () => void;
+}) {
+  return (
+    <>
+      <p className="said">
+        Built. <b>{r.title}</b> — {r.tasks} task{r.tasks === 1 ? '' : 's'}, each in three tiers
+        (support, core, extension) with an answer key. Objectives are copied from the registry.
+      </p>
+      <div className="c pad">
+        <div className="row" style={{ gap: 5 }}>
+          {r.refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+        </div>
+      </div>
+      <div className="acts" style={{ marginTop: 12 }}>
+        <button className="btn primary" onClick={onApprove}>Approve &amp; send to Drive</button>
+        <button className="btn" onClick={onOpen}>Open the worksheet PDF</button>
+      </div>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+        Open it to check it first. Approving puts it in the shared bank and sends the printable PDF —
+        with a tear-off answer key — to your subject&rsquo;s Drive folder.
+      </p>
+    </>
+  );
+}
+
+/**
+ * Turn a file into a study pack. The upload is reconciled against the registry
+ * first — every objective code in it is matched against the school's own
+ * curriculum, and only the ones that resolve seed the pack. A code the file names
+ * but the curriculum does not hold is shown and never used (main spec §4).
+ */
+function UploadCard({ classes, onBuild }: {
+  classes: ClassCal[]; onBuild: (uploadId: string) => void;
+}) {
+  const [chosen, setChosen] = useState(classes[0]?.id ?? '');
+  const k = classes.find(c => c.id === chosen) ?? classes[0];
+  const [file, setFile] = useState<File | null>(null);
+  const [state, setState] = useState<'idle' | 'reading' | 'done' | 'error'>('idle');
+  const [result, setResult] = useState<UploadResult | null>(null);
+  const [err, setErr] = useState('');
+
+  async function reconcile() {
+    if (!file || !k) return;
+    setState('reading'); setErr(''); setResult(null);
+    const fd = new FormData();
+    fd.append('file', file); fd.append('subjectId', k.subject_id); fd.append('yearGroup', k.year_group);
+    try {
+      const r = await fetch('/api/ingest/upload', { method: 'POST', body: fd }).then(r => r.json());
+      if (r.error) { setState('error'); setErr(r.error); return; }
+      setResult(r as UploadResult); setState('done');
+    } catch { setState('error'); setErr('The upload failed. Nothing was saved — try again.'); }
+  }
+
+  if (!k) return null;
+
+  return (
+    <>
+      <p className="said">
+        Which subject is this file for? I match every objective code in it against that subject&rsquo;s
+        registry, and build only from the ones the curriculum holds.
+      </p>
+      <div className="row" style={{ marginTop: 10, gap: 7 }}>
+        {classes.map(c => (
+          <button key={c.id} className={`chip ${c.id === k.id ? 'key' : ''}`} onClick={() => setChosen(c.id)}>
+            {c.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="c pad" style={{ marginTop: 12 }}>
+        <input type="file" accept=".pdf,.docx"
+               onChange={e => { setFile(e.target.files?.[0] ?? null); setState('idle'); setResult(null); }} />
+        <div className="acts" style={{ marginTop: 10 }}>
+          <button className="btn" disabled={!file || state === 'reading'} onClick={reconcile}>
+            {state === 'reading' ? 'Reading and reconciling…' : 'Reconcile against the registry'}
+          </button>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>.pdf or .docx</span>
+        </div>
+        {state === 'error' && <small className="cerr" style={{ display: 'block', marginTop: 8 }}>{err}</small>}
+      </div>
+
+      {state === 'done' && result && (
+        <div className="c pad" style={{ marginTop: 12 }}>
+          <p style={{ fontSize: 13.5, margin: '0 0 8px' }}>{result.note}</p>
+          {result.resolved.length > 0 && (
+            <>
+              <div className="eyebrow" style={{ marginBottom: 5 }}>Resolved — these seed the pack</div>
+              <div className="row" style={{ gap: 5 }}>
+                {result.resolved.map(o => <span key={o.ref} className="pill ref">{o.ref}</span>)}
+              </div>
+            </>
+          )}
+          {result.unresolved.length > 0 && (
+            <>
+              <div className="eyebrow" style={{ margin: '11px 0 5px' }}>Not in the registry — never used</div>
+              <div className="row" style={{ gap: 5 }}>
+                {result.unresolved.map(ref => <span key={ref} className="pill warn">{ref}</span>)}
+              </div>
+            </>
+          )}
+          <div className="acts" style={{ marginTop: 13 }}>
+            <button className="btn primary" disabled={!result.resolved.length}
+                    onClick={() => onBuild(result.uploadId)}>
+              {result.resolved.length
+                ? `Build from ${result.resolved.length} resolved objective${result.resolved.length === 1 ? '' : 's'}`
+                : 'Nothing resolved to build from'}
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }

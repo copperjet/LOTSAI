@@ -12,16 +12,24 @@ import type { Objective } from './planner';
  */
 
 /**
- * Built per lesson, because the tags are only meaningful as the references this
- * lesson actually carries. A small model asked for "the references supplied" in
- * prose will happily answer with objective text instead; an enum makes that
- * impossible rather than merely discouraged.
+ * The model tags objectives by INDEX into the list we supplied, exactly as the
+ * planner selects them (lib/planner.ts). It never writes a reference.
  *
- * An uncoded week has no references at all — an empty enum is not valid schema,
- * so those fall back to plain strings and the filter below empties them.
+ * This started as an enum of the lesson's syllabus references, which is wrong
+ * for a reason worth keeping written down. A lesson may legitimately carry an
+ * objective with no reference — an uncoded overview row, or a strand the
+ * ingest could not parse. Those objectives were absent from the enum, so a
+ * model asked to flag one had no legal token for it and put the only value the
+ * enum allowed. A live evaluation flagged one reference twelve times, in a
+ * lesson where it had also just been marked landed.
+ *
+ * Every objective has an index, so there is always something true to say.
  */
-function schemaFor(refs: string[]) {
-  const ref = refs.length ? { type: 'string', enum: refs } : { type: 'string' };
+function schemaFor() {
+  // minimum/maximum are not accepted under strict structured output, so the
+  // range is enforced after parsing instead — the same way the planner bounds
+  // day_of_week.
+  const index = { type: 'integer' };
   return {
     type: 'object', additionalProperties: false,
     // Strict structured output requires every property to be listed as required,
@@ -29,8 +37,8 @@ function schemaFor(refs: string[]) {
     required: ['formatted_comment', 'landed', 'flagged', 'clarifying_question'],
     properties: {
       formatted_comment: { type: 'string' },
-      landed:  { type: 'array', items: ref },
-      flagged: { type: 'array', items: ref },
+      landed:  { type: 'array', items: index },
+      flagged: { type: 'array', items: index },
       // At most one, and only when the tags genuinely cannot be decided.
       clarifying_question: { type: ['string', 'null'] },
     },
@@ -47,16 +55,28 @@ Two jobs, and nothing else:
    every reservation. Do not add praise, advice, targets or next steps. Do not invent detail the
    teacher did not give you. If they were brief, your comment is brief.
 
-2. Tag each objective for the lesson as landed or flagged, using only the references supplied. An
+2. Tag each objective for the lesson as landed or flagged, by its index in the list supplied. An
    objective is landed if the note indicates most of the class got it. It is flagged if the note
    indicates confusion, partial understanding, or that it needs revisiting. If the note says nothing
    about an objective at all, leave it out of both lists rather than guessing.
+
+   An index appears in at most one of the two lists, and at most once. An objective the class got
+   is not also an objective needing revisiting.
 
 Ask a clarifying question only if you genuinely cannot tag the objectives — never more than one, and
 never about anything else. Most notes need no question.
 
 Never write in the HOD's voice. Never write in the first person as the teacher.`;
 
+/** What the model returns: indexes, never references. */
+interface TaggedByIndex {
+  formatted_comment: string;
+  landed: number[];
+  flagged: number[];
+  clarifying_question: string | null;
+}
+
+/** What callers get: references, resolved from those indexes. */
 export interface EvaluationResult {
   formatted_comment: string;
   landed: string[];
@@ -69,9 +89,9 @@ export async function formatEvaluation(
   lesson: { objectives: Objective[]; methodology: string; className: string; day: string; period?: number },
   userId: string,
 ) {
-  const refs = lesson.objectives.map(o => o.ref).filter((r): r is string => !!r);
+  const objectives = lesson.objectives;
 
-  const { data, usage } = await call<EvaluationResult>({
+  const { data, usage } = await call<TaggedByIndex>({
     tier: 'small',
     workflow: 'lesson_evaluation',
     userId,
@@ -79,22 +99,42 @@ export async function formatEvaluation(
     // Small and per-lesson, so there is nothing worth a cache breakpoint here.
     prompt: [
       `Lesson: ${lesson.className}, ${lesson.day}${lesson.period ? `, period ${lesson.period}` : ''}.`,
-      `Objectives${refs.length ? '' : ' (this overview has no syllabus codes — leave both lists empty)'}:`,
-      ...lesson.objectives.map(o => `  ${o.ref ? o.ref + ' — ' : ''}${o.text}`),
+      `Objectives (tag these by index):`,
+      ...objectives.map((o, i) => `  [${i}] ${o.ref ? o.ref + ' — ' : ''}${o.text}`),
       `Planned methodology: ${lesson.methodology}`,
       ``,
       `The teacher said: "${raw}"`,
     ].join('\n'),
-    schema: schemaFor(refs) as unknown as Record<string, unknown>,
+    schema: schemaFor() as unknown as Record<string, unknown>,
     maxTokens: 700,
   });
 
-  // The model may only tag references that exist on this lesson.
-  const allowed = new Set(refs);
-  return {
-    ...data,
-    landed:  data.landed.filter(r => allowed.has(r)),
-    flagged: data.flagged.filter(r => allowed.has(r)),
-    usage,
+  /**
+   * Indexes to references. Three things are enforced here rather than trusted:
+   *
+   *  - an index must be in range;
+   *  - flagged wins a conflict, because "needs revisiting" is the tag that
+   *    changes next week's plan, and losing it is the more costly mistake;
+   *  - each reference appears once.
+   *
+   * An objective with no reference is dropped from both lists: coverage is
+   * counted in references, and there is nothing to count it under. It still
+   * appears in the formatted comment, which is where the teacher will see it.
+   */
+  const resolve = (indexes: number[], exclude?: Set<string>) => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const i of indexes) {
+      const ref = objectives[i]?.ref;
+      if (!ref || seen.has(ref) || exclude?.has(ref)) continue;
+      seen.add(ref);
+      out.push(ref);
+    }
+    return out;
   };
+
+  const flagged = resolve(data.flagged ?? []);
+  const landed = resolve(data.landed ?? [], new Set(flagged));
+
+  return { ...data, landed, flagged, usage } as EvaluationResult & { usage: typeof usage };
 }

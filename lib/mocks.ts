@@ -60,13 +60,19 @@ export function mockPlan(cached: string, prompt: string) {
 }
 
 export function mockEvaluation(prompt: string) {
-  const refs = [...prompt.matchAll(/^\s{2}([A-Za-z0-9][A-Za-z0-9._]*) \u2014 /gm)].map(m => m[1]);
+  // Indexes, matching the real schema: `  [0] 4Np.03 \u2014 ...`. The fixture used to
+  // read references off the prompt, which meant MOCK_LLM never exercised the
+  // index-to-reference resolution the live path depends on \u2014 so the tagging bug
+  // it exists to catch could not have shown up here.
+  const n = objectiveCount(prompt);
+  const all = Array.from({ length: n }, (_, i) => i);
   return {
     formatted_comment:
       'Most of the class regrouped confidently by the end of the period. A small group still needed the '
       + 'blocks in front of them, and rounding upwards from a five was not secure.',
-    landed: refs.slice(0, Math.max(1, refs.length - 1)),
-    flagged: refs.length > 1 ? refs.slice(-1) : [],
+    landed: all.slice(0, Math.max(1, n - 1)),
+    flagged: n > 1 ? all.slice(-1) : [],
+    clarifying_question: null,
   };
 }
 
@@ -83,10 +89,87 @@ export function mockGate() {
   };
 }
 
+/**
+ * A study pack, read off the same cached registry block the model sees:
+ * `Week N: label` headers followed by `  [i] ref — text` objective lines. One
+ * unit per week, one topic per unit tagging every objective index under it — so
+ * the fixture exercises the same index-to-reference resolution the live path
+ * does, and the pack it produces satisfies the real gate in lib/studypack.ts.
+ */
+export function mockPack(cached: string) {
+  const units: {
+    unit_label: string; summary: string;
+    topics: { topic_label: string; objective_indexes: number[]; key_ideas: string[];
+      quiz: { q: string; options: string[]; correct: number; explain: string }[]; think_question: string }[];
+  }[] = [];
+  let cur: (typeof units)[number] | null = null;
+
+  for (const line of cached.split('\n')) {
+    const week = line.match(/^Week (\d+):\s*(.*)$/);
+    if (week) {
+      cur = { unit_label: `Week ${week[1]}: ${week[2].trim()}`.slice(0, 80), summary: week[2].trim(),
+              topics: [{ topic_label: week[2].trim().slice(0, 60) || `Week ${week[1]}`,
+                         objective_indexes: [], key_ideas: [], quiz: [], think_question: '' }] };
+      units.push(cur);
+      continue;
+    }
+    const idx = line.match(/^\s*\[(\d+)\]/);
+    if (idx && cur) cur.topics[0].objective_indexes.push(+idx[1]);
+  }
+
+  for (const u of units) {
+    const t = u.topics[0];
+    t.key_ideas = [
+      'Recap the key vocabulary before reading the passage.',
+      'Model the skill once, then let learners try it in pairs.',
+      'Check understanding with a short question before moving on.',
+    ];
+    t.quiz = [
+      { q: 'What should you do before reading a new passage?', options: ['Skip the title', 'Recap key vocabulary', 'Close the book'], correct: 1, explain: 'Recapping vocabulary makes the passage easier to follow.' },
+      { q: 'How is a skill best practised?', options: ['Watching only', 'In pairs after a model', 'Never'], correct: 1, explain: 'Modelling then paired practice embeds the skill.' },
+    ];
+    t.think_question = 'How would you explain this topic to a classmate who missed the lesson?';
+  }
+
+  return {
+    title: 'Revision pack',
+    units: units.filter(u => u.topics[0].objective_indexes.length),
+    glossary: [
+      { term: 'Fiction', definition: 'A text that tells an imagined story.' },
+      { term: 'Non-fiction', definition: 'A text about real facts and information.' },
+    ],
+  };
+}
+
+/**
+ * A worksheet, read off the same cached registry block the model sees: one
+ * `[i] ref — text` line per objective. Produces one differentiated task per
+ * objective (up to six), each tagging that objective's index — so the fixture
+ * exercises the same index-to-reference resolution the live path does, and the
+ * three tiers and answer key the Standard's gate checks are all present.
+ */
+export function mockWorksheet(cached: string) {
+  const idxs = [...cached.matchAll(/^\s*\[(\d+)\]/gm)].map(m => +m[1]).slice(0, 6);
+  const tasks = (idxs.length ? idxs : [0]).map((i, n) => ({
+    objective_indexes: [i],
+    core: `Task ${n + 1}: complete the questions on the topic, showing your working.`,
+    support: 'Use the worked example at the top of the sheet, and the sentence stem provided, to start.',
+    extension: 'Explain, in a sentence, why your method works — and try it on a harder example of your own.',
+    answer: 'Answers vary; accept correct working consistent with the objective.',
+  }));
+  return {
+    title: 'Practice worksheet',
+    intro: 'Work through the tasks in order. Ask for the Support box if you need a way in.',
+    tasks,
+  };
+}
+
 /** Routed on CallOpts.workflow. Anything unknown gets an empty object. */
 export function mockFor(workflow: string, cached: string, prompt: string): unknown {
   if (workflow === 'planner_create' || workflow === 'planner_adapt') return mockPlan(cached, prompt);
   if (workflow === 'lesson_evaluation') return mockEvaluation(prompt);
   if (workflow === 'quality_gate') return mockGate();
+  if (workflow === 'studypack_create') return mockPack(cached);
+  if (workflow === 'worksheet_create') return mockWorksheet(cached);
   return {};
 }

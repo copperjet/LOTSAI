@@ -27,8 +27,34 @@ try:
 except ImportError:
     sys.exit("pip install python-docx")
 
-# Cambridge references: 4Np.01, 9E.02, 4Gt.04, 6Ni.07 ...
-REF = re.compile(r'\b(\d{1,2}[A-Z][a-z]{0,2}\.\d{2})\b')
+# PyMuPDF reads the 43 overviews that exist only as PDF — no Word version behind
+# them (readiness report, "could_not_import"). They carry a real text layer and
+# the same WEEK / TOPIC / OBJECTIVES table the .docx overviews do, so a PDF is
+# extracted to the same cell grid and run through the identical header_map,
+# week_number and split_objectives below. One parser, two container formats —
+# never a second set of rules that could drift from the first.
+#
+# Optional: a deployment with no PyMuPDF still ingests every .docx and reports
+# each PDF as unreadable exactly as before, rather than failing to start.
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    fitz = None
+
+# Cambridge references: 4Np.01, 9E.02, 4Gt.04, 6Ni.07, 4SLp.02 ...
+#
+# The strand letters are one or TWO capitals. English Speaking & Listening is
+# the two-capital case — 4SLm, 4SLp, 4SLg, 4SLr, 4SLs — and a single [A-Z] here
+# silently imported all 34 of CP4 English's Speaking & Listening objectives as
+# uncoded. They then could not be counted toward coverage, could not enter a
+# work key, and could not be tagged by the evaluation loop, which is where the
+# bug surfaced.
+#
+# Same lesson as the header_map fix: before concluding the school's documents
+# are missing a code, check that the parser can express the code's shape.
+# Widening to {1,2} adds exactly those 16 references across the corpus and no
+# false positives — verified against the full ingest before changing it.
+REF = re.compile(r'\b(\d{1,2}[A-Z]{1,2}[a-z]{0,2}\.\d{2})\b')
 
 WORD_NUM = {'one':1,'two':2,'three':3,'four':4,'five':5,'six':6,'seven':7,'eight':8,
             'nine':9,'ten':10,'eleven':11,'twelve':12,'thirteen':13,'fourteen':14,'fifteen':15}
@@ -90,7 +116,7 @@ def classify(path: Path):
 
 
 def week_number(cell: str):
-    """'Week Three*  7th to 11th' -> 3"""
+    """'Week Three*  7th to 11th' -> 3;  '1 (24th Aug-28th Aug)' -> 1"""
     t = cell.strip().lower()
     m = re.search(r'week\s*(\d{1,2})', t)
     if m:
@@ -98,6 +124,12 @@ def week_number(cell: str):
     m = re.search(r'week\s+([a-z]+)', t)
     if m and m.group(1) in WORD_NUM:
         return WORD_NUM[m.group(1)]
+    # A bare leading week number in its own column — several PDF overviews label
+    # the week cell "1 (24th Aug–28th Aug, 2026)" with no the word "week". Bounded
+    # to 1–15 so a stray figure elsewhere cannot be read as a week.
+    m = re.match(r'(\d{1,2})\b', t)
+    if m and 1 <= int(m.group(1)) <= 15:
+        return int(m.group(1))
     return None
 
 
@@ -118,14 +150,55 @@ def split_objectives(text: str):
     return out
 
 
-def header_map(table):
+def docx_tables(path: Path):
+    """Every table in a .docx, as a grid of plain-string cells."""
+    doc = Document(str(path))
+    grids = []
+    for table in doc.tables:
+        grids.append([[c.text.replace('\xa0', ' ') for c in row.cells] for row in table.rows])
+    return grids
+
+
+def pdf_tables(path: Path):
+    """
+    Every table in a PDF, as the same grid of plain-string cells docx_tables
+    returns. PyMuPDF's cell text keeps the intra-cell newlines that
+    split_objectives relies on, so a PDF row reads exactly like a docx row.
+
+    A PDF table extracts with empty spacer columns and, occasionally, a fully
+    empty leading row; both are harmless — header_map matches columns by header
+    text and skips a row with no week number, so position noise is ignored
+    rather than needing to be cleaned out first.
+    """
+    if fitz is None:
+        raise RuntimeError('PyMuPDF not installed — cannot read PDF (pip install pymupdf)')
+    grids = []
+    with fitz.open(str(path)) as doc:
+        for page in doc:
+            for tab in page.find_tables().tables:
+                grid = [[(c or '') for c in row] for row in tab.extract()]
+                if grid:
+                    grids.append(grid)
+    return grids
+
+
+def header_map(grid):
     """Find which column holds what. Overviews vary; the header row does not lie."""
-    heads = [c.text.strip().lower() for c in table.rows[0].cells]
-    if not any('week' in h for h in heads) and len(table.rows) > 1:
-        heads = [c.text.strip().lower() for c in table.rows[1].cells]
-        offset = 2
+    def cells(row):
+        return [(c or '').strip().lower() for c in row]
+    heads = cells(grid[0])
+    # A PDF table can open with one or more fully empty rows before the header;
+    # a .docx never does. Skip blank leads, then apply the same header-on-next-row
+    # rule the .docx overviews already needed.
+    lead = 0
+    while lead < len(grid) - 1 and not any(h for h in heads):
+        lead += 1
+        heads = cells(grid[lead])
+    if not any('week' in h for h in heads) and len(grid) > lead + 1:
+        heads = cells(grid[lead + 1])
+        offset = lead + 2
     else:
-        offset = 1
+        offset = lead + 1
     col = {}
     for i, h in enumerate(heads):
         if 'week' in h and 'week' not in col:  col['week'] = i
@@ -150,39 +223,119 @@ def header_map(table):
     return (col, offset) if 'week' in col and 'obj' in col else (None, offset)
 
 
-def read_overview(path: Path):
-    doc = Document(str(path))
-    rows, notes = [], []
-    for table in doc.tables:
-        col, offset = header_map(table)
+def emit_row(wk, obj_text, act_text='', res_cells=None):
+    """
+    Build one curriculum_week row from the raw cell strings, whatever read them.
+    Both readers funnel through here so a PDF week and a .docx week are shaped and
+    cleaned identically — objectives split the same way, topic derived the same
+    way, resources pulled from a Resources column or, failing that, from the tail
+    of the objectives cell the way Science overviews write them.
+    """
+    objs = split_objectives(obj_text)
+    if not objs:
+        return None
+    topic = objs[0]['text'][:90] if objs[0]['ref'] is None else obj_text.split('\n')[0][:90]
+    res = list(res_cells) if res_cells else []
+    if not res:
+        tail = re.split(r'\bResources\b', obj_text, flags=re.I)
+        res = tail[1].split('\n') if len(tail) > 1 else []
+    return {
+        'week': wk,
+        'week_commencing': WEEK_MONDAYS.get(wk),
+        'is_teaching_week': wk in TEACHING_WEEKS,
+        'topic_label': topic.strip(),
+        'objectives': objs,
+        'activities': [a.strip(' 0123456789.•') for a in act_text.split('\n') if a.strip()],
+        'resources': [x.strip(' -•') for x in res if x.strip(' -•')],
+    }
+
+
+def read_docx_overview(path: Path):
+    """Clean-celled grids: map columns by header text (header_map)."""
+    rows = []
+    for grid in docx_tables(path):
+        col, offset = header_map(grid)
         if not col:
             continue
-        for r in table.rows[offset:]:
-            cells = [c.text.replace('\xa0', ' ').strip() for c in r.cells]
+        for r in grid[offset:]:
+            cells = [(c or '').replace('\xa0', ' ').strip() for c in r]
             if len(cells) <= max(col.values()):
                 continue
             wk = week_number(cells[col['week']])
             if not wk:
                 continue
-            objs = split_objectives(cells[col['obj']])
-            if not objs:
-                continue
-            topic = objs[0]['text'][:90] if objs[0]['ref'] is None else cells[col['obj']].split('\n')[0][:90]
-            res = cells[col['res']].split('\n') if 'res' in col else []
-            if 'res' not in col:                       # Science keeps resources inside the objectives cell
-                tail = re.split(r'\bResources\b', cells[col['obj']], flags=re.I)
-                res = tail[1].split('\n') if len(tail) > 1 else []
-            rows.append({
-                'week': wk,
-                'week_commencing': WEEK_MONDAYS.get(wk),
-                'is_teaching_week': wk in TEACHING_WEEKS,
-                'topic_label': topic.strip(),
-                'objectives': objs,
-                'activities': [a.strip(' 0123456789.•') for a in cells[col['act']].split('\n') if a.strip()] if 'act' in col else [],
-                'resources': [x.strip(' -•') for x in res if x.strip(' -•')],
-            })
-    if not rows:
-        notes.append('no week table found — needs a human look')
+            row = emit_row(
+                wk, cells[col['obj']],
+                cells[col['act']] if 'act' in col else '',
+                cells[col['res']].split('\n') if 'res' in col else None,
+            )
+            if row:
+                rows.append(row)
+    return rows
+
+
+def read_pdf_overview(path: Path):
+    """
+    PDF grids do not map by header position: PyMuPDF routinely places the "WEEK"
+    header cell in a different column from the week values beneath it, and wraps a
+    single objectives cell across several physical rows. So columns are found by
+    content, and a row is assembled by week marker rather than by grid row —
+    tolerant of both the column drift and the fragmentation.
+
+    A week begins at any cell that parses as a week number; every following row
+    with no week number appends its objectives-column fragment to that week. The
+    rules doing the actual reading — week_number, the REF pattern, split_objectives,
+    emit_row — are the same ones the .docx path uses.
+    """
+    rows = []
+    for grid in pdf_tables(path):
+        if len(grid) < 2:
+            continue
+        ncol = max(len(r) for r in grid)
+        wk_hits = [0] * ncol
+        ref_hits = [0] * ncol
+        txt_len = [0] * ncol
+        for r in grid:
+            for i, c in enumerate(r):
+                c = c or ''
+                if week_number(c) is not None:
+                    wk_hits[i] += 1
+                ref_hits[i] += len(REF.findall(c))
+                txt_len[i] += len(c)
+        if not any(wk_hits):
+            continue
+        wk_col = max(range(ncol), key=lambda i: wk_hits[i])
+        obj_col = max(range(ncol), key=lambda i: (ref_hits[i], txt_len[i]))
+        if obj_col == wk_col:
+            continue
+
+        def cell(r, i):
+            return (r[i] or '') if i < len(r) else ''
+
+        pending = None   # (week, [objective fragments])
+        for r in grid:
+            wn = week_number(cell(r, wk_col))
+            if wn is not None:
+                if pending:
+                    row = emit_row(pending[0], '\n'.join(pending[1]))
+                    if row:
+                        rows.append(row)
+                pending = (wn, [cell(r, obj_col)])
+            elif pending:
+                frag = cell(r, obj_col)
+                if frag.strip():
+                    pending[1].append(frag)
+        if pending:
+            row = emit_row(pending[0], '\n'.join(pending[1]))
+            if row:
+                rows.append(row)
+    return rows
+
+
+def read_overview(path: Path):
+    reader = read_pdf_overview if path.suffix.lower() == '.pdf' else read_docx_overview
+    rows = reader(path)
+    notes = [] if rows else ['no week table found — needs a human look']
     return rows, notes
 
 
@@ -215,21 +368,38 @@ def main():
             continue
         claims[(yg, subj, sem)].append(path)
 
+    # An HOD's conflict decisions, recorded in the app and exported to this file:
+    # { "<year_group>|<subject>|<semester>": "<winning file, relative to root>" }.
+    # A resolved conflict is not asked again — the named file is used and the others
+    # ignored. A resolution naming a file that no longer exists is itself reported,
+    # rather than silently falling back to a guess.
+    resolutions = {}
+    res_path = out / 'conflict_resolutions.json'
+    if res_path.exists():
+        try:
+            resolutions = json.loads(res_path.read_text(encoding='utf-8'))
+        except Exception as e:
+            print(f"!! ignoring {res_path.name}: {e}")
+
     weeks, conflicts, failed = [], [], []
 
     for (yg, subj, sem), paths in sorted(claims.items()):
         docx = [p for p in paths if p.suffix.lower() == '.docx']
         chosen = docx[0] if docx else paths[0]                 # docx wins over pdf
         if len(docx) > 1 or (not docx and len(paths) > 1):
-            conflicts.append({'year_group': yg, 'subject': subj, 'semester': sem,
-                              'files': [str(p.relative_to(root)) for p in paths],
-                              'needs': 'HOD picks which file is current — the importer will not guess'})
-            continue
-        if chosen.suffix.lower() == '.pdf':
-            failed.append({'year_group': yg, 'subject': subj, 'semester': sem,
-                           'file': str(chosen.relative_to(root)),
-                           'why': 'PDF only — no Word version to import from'})
-            continue
+            pick = resolutions.get(f'{yg}|{subj}|{sem}')
+            match = next((p for p in paths if str(p.relative_to(root)) == pick), None) if pick else None
+            if pick and not match:
+                conflicts.append({'year_group': yg, 'subject': subj, 'semester': sem,
+                                  'files': [str(p.relative_to(root)) for p in paths],
+                                  'needs': f'recorded decision names "{pick}", which is not among these files — re-decide'})
+                continue
+            if not match:
+                conflicts.append({'year_group': yg, 'subject': subj, 'semester': sem,
+                                  'files': [str(p.relative_to(root)) for p in paths],
+                                  'needs': 'HOD picks which file is current — the importer will not guess'})
+                continue
+            chosen = match                                     # decision honoured
         try:
             rows, notes = read_overview(chosen)
         except Exception as e:
@@ -244,14 +414,30 @@ def main():
             weeks.append({'academic_year': args.year, 'year_group': yg, 'subject': subj,
                           'semester': sem, 'source_file': str(chosen.relative_to(root)), **r})
 
-    coded = [w for w in weeks if any(o['ref'] for o in w['objectives'])]
+    # Count distinct curriculum weeks, not raw emitted rows. A PDF whose week
+    # spans a page break is read as two tables and emits the same
+    # (year_group, subject, semester, week) twice; an overview running parallel
+    # units emits it twice legitimately. Either way the registry holds one week —
+    # the seed merges them — so the human-facing readiness numbers must count the
+    # week, not the fragment, or "weeks imported" reads far higher than the school
+    # has weeks.
+    def wkey(w):
+        return (w['year_group'], w['subject'], w['semester'], w['week'])
+    distinct = {wkey(w): False for w in weeks}
+    for w in weeks:
+        if any(o['ref'] for o in w['objectives']):
+            distinct[wkey(w)] = True
+    n_weeks = len(distinct)
+    n_coded = sum(distinct.values())
+
     report = {
         'academic_year': args.year,
         'summary': {
-            'weeks_imported': len(weeks),
-            'weeks_with_syllabus_refs': len(coded),
-            'weeks_topic_only': len(weeks) - len(coded),
-            'subjects_ready': len({(w['year_group'], w['subject'], w['semester']) for w in coded}),
+            'weeks_imported': n_weeks,
+            'weeks_with_syllabus_refs': n_coded,
+            'weeks_topic_only': n_weeks - n_coded,
+            'subjects_ready': len({(yg, subj, sem) for (yg, subj, sem, _), c in distinct.items() if c}),
+            'source_rows_emitted': len(weeks),
             'duplicate_conflicts': len(conflicts),
             'excluded_files': len(excluded),
             'unreadable': len(failed),

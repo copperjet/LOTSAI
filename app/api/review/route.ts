@@ -41,7 +41,19 @@ export async function GET(req: NextRequest) {
       if (!row.signed_off_at) g.signed = false;
       groups.set(key, g);
     }
-    return NextResponse.json({ blocked: [...groups.values()].filter(g => !g.signed) });
+    // What never reached the registry at all: conflicts a human must decide,
+    // files that could not be read, filenames that could not be placed. These
+    // sit alongside the imported-but-unsigned subjects above — both are "not
+    // plannable yet", for different reasons a reviewer needs told apart.
+    const { data: gaps } = await db.from('registry_gap')
+      .select('id, kind, year_group, subject, semester, detail, files, resolved_file')
+      .eq('academic_year', '2026-27')
+      .order('kind');
+
+    return NextResponse.json({
+      blocked: [...groups.values()].filter(g => !g.signed),
+      gaps: gaps ?? [],
+    });
   }
 
   if (view === 'coverage') {

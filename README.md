@@ -24,6 +24,13 @@ Create a project at supabase.com, then in the SQL editor run, in order:
 - `supabase/migrations/0002_functions.sql`
 - `supabase/migrations/0003_edits.sql`
 - `supabase/migrations/0004_usage_provider.sql`
+- `supabase/migrations/0005_objective_provenance.sql`
+- `supabase/migrations/0006_registry_gap.sql`
+- `supabase/migrations/0007_artefact_engine.sql`
+
+Then create a **private Storage bucket** named `artefacts` (Storage → New bucket), where rendered
+PDFs are written. `npm run seed` creates it automatically if the service role can; creating it by
+hand is harmless.
 
 ### 3. Keys
 
@@ -55,7 +62,9 @@ npm run ingest     # reads ../CURRICULUM OVERVIEWS, writes supabase/seed/
 npm run seed       # loads calendar, people, classes and the registry
 ```
 
-`npm run ingest` needs Python with `python-docx` (`pip install python-docx`).
+`npm run ingest` needs Python with `python-docx` and `pymupdf`
+(`pip install python-docx pymupdf`). Without PyMuPDF it still reads every `.docx` and reports each
+PDF as unreadable, rather than failing to start.
 
 ### 5. Deploying
 
@@ -80,26 +89,37 @@ MOCK_LLM=1 npm run dev
 
 Run on the school's real folder, 2026-27:
 
-- **198 week rows imported** across the year groups it could read
-- **54 of them carry Cambridge syllabus references.** The rest state objectives in prose
+- **895 distinct curriculum weeks imported** across every year group it could read, EY to A Level
+- **203 of them carry Cambridge syllabus references** across **21 subject/year groups**. The rest
+  state objectives in prose
 - **10 duplicate conflicts** where two files claim the same subject, year and semester
 - **10 files excluded** — named `DELETE`, or labelled with a previous academic year
-- **62 could not be read** — mostly PDF with no Word version behind it
+- **2 could not be read** — a table the extractor could not find; each needs a human look
 
-Those 54 were 11 until the column mapping was fixed. `header_map` took the first header matching
-`objective | topic | unit`, and several overviews run
-`UNIT / TOPIC | STRAND / FOCUS | LEARNING OBJECTIVES` — so it locked onto Unit, read
-"Unit 4.1 Historical stories" as the objectives, and filed a document carrying 140 references as
-topic-only. The headers are scored now. The lesson generalises: before concluding that the school's
-documentation is missing something, check that the parser is looking at the right column.
+Three parser fixes account for most of that reach, and they share one lesson. **The column mapping:**
+`header_map` took the first header matching `objective | topic | unit`, and several overviews run
+`UNIT / TOPIC | STRAND / FOCUS | LEARNING OBJECTIVES` — so it locked onto Unit and filed a document
+carrying 140 references as topic-only; the headers are scored now. **The strand pattern:** the
+reference regex allowed one capital letter for the strand, so all 34 of CP4 English's Speaking &
+Listening objectives (`4SLp`, `4SLm`, `4SLg` …) imported uncoded; it takes one or two now. **The
+PDF reader:** 43 overviews existed only as PDF and were reported unreadable — they carry the same
+week table, so a PDF is extracted to the same cell grid and read by the same rules (PyMuPDF; columns
+found by content, because a PDF places the `WEEK` header in a different column from its values).
 
-`supabase/seed/readiness_report.json` is the full breakdown, per subject. It is worth showing to the
-Academic Coordinator on its own: it answers a question the school currently cannot answer, which is
-whether its curriculum documentation is complete.
+The lesson generalises, and is worth keeping: **before concluding the school's documentation is
+missing something, check that the parser can represent what it is reading.** Each fix was verified
+against the full corpus before it changed anything — the strand widening, for instance, added exactly
+16 references and no false positives.
 
-After seeding, **26 weeks are signed off and plannable** — CP4 Mathematics and CP4 English. The rest
-stay blocked because their overviews genuinely carry no codes, and inventing one is the single thing
-this system must never do.
+`supabase/seed/readiness_report.json` is the full breakdown, per subject, and it is loaded into the
+`registry_gap` table so an HOD sees it in the app — the conflicts to decide, the files still to read.
+It answers a question the school currently cannot answer: whether its curriculum documentation is
+complete.
+
+After seeding, **125 weeks are signed off and plannable** across CP4–CP6, LS1–LS3 and beyond. The
+rest stay blocked because their overviews genuinely carry no codes, and inventing one is the single
+thing this system must never do. A conflict, once an HOD decides which file is current, is recorded in
+`supabase/seed/conflict_resolutions.json` and honoured on the next ingest — never guessed.
 
 **This is the critical path, not the app.** Only weeks with syllabus references can be matched
 between teachers or counted toward coverage, so `npm run seed` signs off only those and leaves
@@ -226,6 +246,33 @@ is around 750 input tokens, and OpenAI only caches prefixes of 1024 tokens or mo
 long enough to cache at all. That is not worth padding a prompt to reach — but it does mean the §D8
 cost model must not assume a cache discount while `LLM_PROVIDER=openai`.
 
+### The artefact engine
+
+A workflow is a record, not a route (main spec §3.2, Addendum C §C6). Two tables carry it: a
+`standard` (the five parts §C2 names — schema, non-negotiables, and the ids of a generator, gate and
+renderer, versioned by academic year) and a `workflow` (the §C6 config — grounding, collaborative
+keying, approval states, render trigger). The planner runs through this today: its routes call
+`lib/engine.ts`, which loads the workflow and dispatches generation, gating and rendering through
+`lib/workflows/registry.ts`.
+
+The **declarative** parts of a Standard are data; the **imperative** parts (how a plan is generated,
+gated, drawn) are code, registered once under the ids the Standard names. Adding "study pack" is a
+Standard record, a workflow row, and a registered renderer — never a new route. The engine falls back
+to a built-in `weekly_planner` config when the tables are empty, so the loop behaves identically
+before and after `0007` is applied.
+
+On approval, the planner is **rendered to a PDF** on the LOTS template (`lib/pdf/`, pdf-lib in-process,
+logic ported from eScholr — including `sanitizeWinAnsi`, which every model-authored document needs) and
+written to the private `artefacts` bucket. The `pdf_jobs` row is the ledger; `POST /api/pdf/run`
+re-renders a failed one, `GET /api/pdf/run?plannerId=` returns a signed URL. Render is synchronous —
+there is no worker to drain — and never blocks approval if it fails, because the artefact is already
+banked and a PDF is only a rendering of it (main spec §4).
+
+`POST /api/ingest/upload` takes a `.pdf`/`.docx`, extracts its text, and **reconciles every objective
+code it carries against the registry** (`lib/ingest/reconcile.ts`). Anything that does not resolve is
+returned marked, never accepted — the founding rule that objectives are retrieved, never generated,
+enforced on the way in. This is the foundation the v2 "turn this into a study pack" path stands on.
+
 ---
 
 ## What is not wired yet
@@ -233,7 +280,7 @@ cost model must not assume a cache discount while `LLM_PROVIDER=openai`.
 | | |
 |---|---|
 | **Google Workspace SSO** | `currentUser()` in `lib/supabase.ts` reads `DEMO_USER_EMAIL`. Swapping it for the Supabase session is the whole of the auth work — every route already calls it rather than trusting request input. |
-| **Drive render** | Approval sets `planner.status` and writes to the bank. Rendering the docx into the existing Drive folder still needs the Google Drive API credential. |
+| **Drive + docx render** | Approval renders a **PDF** to the `artefacts` bucket. The docx into the existing Drive folder still needs the Google Drive API credential; the render layer that produces it is in place. |
 | **Offline sync** | Evaluations queue to `localStorage` when the browser is offline. The flush-on-reconnect job is not written. |
 | **Overnight pre-staging** | The batch job that drafts next week at half price. |
 

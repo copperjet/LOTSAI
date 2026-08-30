@@ -88,6 +88,12 @@ async function main() {
     { id: 'CP4B-MATH', name: 'CP4B Mathematics', year_group: 'CP4', subject_id: 'MATH', teacher_id: uid('M. Banda'), periods_per_week: 5 },
     { id: 'CP4A-SCI',  name: 'CP4A Science',     year_group: 'CP4', subject_id: 'SCI',  teacher_id: uid('T. Phiri'), periods_per_week: 3 },
     { id: 'CP4B-SCI',  name: 'CP4B Science',     year_group: 'CP4', subject_id: 'SCI',  teacher_id: uid('M. Banda'), periods_per_week: 3 },
+    // 27 of the 30 ingested CP4 English weeks carry Cambridge references and sign
+    // off same as Math — but no class row taught it, so the registry coverage was
+    // unreachable from the app. Periods/week not stated in the overview; matched
+    // to CP4A Mathematics pending HOD confirmation.
+    { id: 'CP4A-ENG',  name: 'CP4A English',     year_group: 'CP4', subject_id: 'ENG',  teacher_id: uid('T. Phiri'), periods_per_week: 5 },
+    { id: 'CP4B-ENG',  name: 'CP4B English',     year_group: 'CP4', subject_id: 'ENG',  teacher_id: uid('M. Banda'), periods_per_week: 5 },
   ]).then(ok('classes'));
 
   await db.from('resource_inventory')
@@ -184,7 +190,170 @@ async function main() {
 
   const coded = new Set(signable.map(w => `${w.year_group} ${w.subject_id}`));
   console.log(`\nplannable now: ${[...coded].join(', ') || 'nothing'}`);
+
+  await loadRegistryGaps();
+  await loadArtefactEngine();
+
   console.log('done.');
+}
+
+// The weekly planner, expressed as a Standard + workflow — Addendum C §C2/§C6.
+// This mirrors exactly what the planner does today: the schema is the PLAN_SCHEMA
+// from lib/planner.ts, the non-negotiables are the seven from §C4, and the three
+// *_id fields name the implementations already registered in lib/workflows/registry.ts.
+// Loading this changes no behaviour; it is what lets the next artefact type be a
+// record instead of a route.
+const PLANNER_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['lessons'],
+  properties: {
+    lessons: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['day_of_week', 'objective_indexes', 'methodology', 'resources', 'differentiation', 'is_recap'],
+        properties: {
+          day_of_week: { type: 'integer' },
+          objective_indexes: { type: 'array', items: { type: 'integer' } },
+          methodology: { type: 'string' },
+          resources: { type: 'string' },
+          differentiation: { type: 'string' },
+          is_recap: { type: 'boolean' },
+        },
+      },
+    },
+  },
+};
+
+const PLANNER_NON_NEGOTIABLES = [
+  'Every objective carries its syllabus reference from the registry, verbatim. Never paraphrased, never invented.',
+  'Week number and dates match the school calendar, normalised to Monday.',
+  'Methodology names a learner action, not a category.',
+  'Resources come only from the inventory; anything outside it is flagged, never invented.',
+  'Differentiation is present for every lesson, in three named tiers: support, core, extension.',
+  'Any objective flagged as not landed in the previous two weeks appears as explicit recap time.',
+  "Teacher's and HOD's comments are never AI-written.",
+];
+
+async function loadArtefactEngine() {
+  // The private bucket rendered PDFs are written to. Idempotent — a bucket that
+  // already exists is left as it is.
+  const { data: bucket } = await db.storage.getBucket('artefacts');
+  if (!bucket) {
+    const { error } = await db.storage.createBucket('artefacts', { public: false });
+    if (error) console.log(`  .. could not create 'artefacts' bucket (${error.message}) — create it by hand`);
+    else console.log("  ok created private storage bucket 'artefacts'");
+  }
+
+  const std = await db.from('standard').upsert({
+    key: 'weekly_planner', version: 'v1', name: 'Weekly Planner',
+    schema: PLANNER_SCHEMA, non_negotiables: PLANNER_NON_NEGOTIABLES,
+    generator_id: 'planner', gate_id: 'planner', renderer_id: 'planner',
+    tier: 'standard',
+    render: { page: 'A4', template: 'LOTS_Weekly_Planner' },
+  }, { onConflict: 'key,version' });
+  if (std.error) {
+    console.log(`  .. artefact engine not loaded (${std.error.message}) — run migration 0007`);
+    return;
+  }
+
+  const wf = await db.from('workflow').upsert({
+    key: 'weekly_planner', name: 'Weekly Planner', roles: ['teacher'],
+    inputs: { class: 'class_ref', school_week: 'week_ref' },
+    grounding: [
+      'curriculum_week(subject, year_group, school_week)',
+      'evaluations(class, last_n_weeks: 2)',
+      'resource_inventory(subject, year_group)',
+      'standard: weekly_planner@v1',
+      'exemplars(subject, phase, limit: 2)',
+    ],
+    collaborative: {
+      work_key: ['artefact_type', 'subject', 'year_group', 'academic_year', 'school_week', 'objective_set'],
+      on_match: ['reuse', 'adapt'],
+    },
+    generation: { cache_prefix: ['standard', 'exemplars', 'curriculum_week'], max_clarifying_questions: 1 },
+    standard_key: 'weekly_planner', standard_version: 'v1',
+    approval: { submit_to: 'hod', states: ['draft', 'submitted', 'reviewed', 'approved', 'returned'] },
+    render: { on: 'approved', to: 'storage' },
+  }, { onConflict: 'key' });
+  if (wf.error) { console.log(`  .. workflow not loaded: ${wf.error.message}`); return; }
+
+  // Study pack (Addendum C §C3) — the second artefact, a record not a route. Its
+  // Standard is the Study Pack Build Kit: schema (units → topics → objectives, key
+  // ideas, quiz), the six non-negotiables, and the ids of its generator, gate and
+  // renderer. Objectives retrieved from the registry; the pedagogy generated.
+  await db.from('standard').upsert({
+    key: 'study_pack', version: 'v1', name: 'Study Pack',
+    schema: { units: 'Unit[] -> Topic[] { objective_indexes, key_ideas[3-6], quiz[2-4], think_question }', glossary: '{term, definition}[]' },
+    non_negotiables: [
+      'Unit and Topic named on every screen.',
+      'Objectives stated in full, retrieved from the registry, never invented.',
+      'Short key ideas — 3 to 6 bullets per topic, not notes.',
+      'At least one interactive activity per topic (a quiz with feedback).',
+      'A thinking prompt per topic; a glossary for the pack.',
+      'LOTS branding intact — crest, name, footer credit.',
+    ],
+    generator_id: 'studypack', gate_id: 'studypack', renderer_id: 'studypack',
+    tier: 'standard', render: { format: 'html', template: 'LOTS_Study_Pack' },
+  }, { onConflict: 'key,version' });
+
+  await db.from('workflow').upsert({
+    key: 'study_pack', name: 'Study Pack', roles: ['teacher'],
+    inputs: { class: 'class_ref', week_from: 'week', week_to: 'week' },
+    grounding: ['curriculum_week(subject, year_group, week_from..week_to)', 'standard: study_pack@v1'],
+    collaborative: { work_key: ['artefact_type', 'subject', 'year_group', 'academic_year', 'week_from', 'objective_set'], on_match: ['reuse'] },
+    generation: { cache_prefix: ['standard', 'curriculum_week'], max_clarifying_questions: 0 },
+    standard_key: 'study_pack', standard_version: 'v1',
+    approval: { submit_to: 'hod', states: ['draft', 'submitted', 'approved', 'returned'] },
+    render: { on: 'create', to: 'storage', format: 'html' },
+  }, { onConflict: 'key' });
+
+  console.log('  ok artefact engine: weekly_planner@v1, study_pack@v1 (standards + workflows)');
+}
+
+/**
+ * Carry the ingest's readiness report into the app, so an HOD can see what stands
+ * between the school's documents and a complete registry — the conflicts a human
+ * must decide, the files that could not be read, the filenames that could not be
+ * placed. This is the standalone deliverable to the Academic Coordinator the spec
+ * names (main spec §9 step 0); until now it lived only as a JSON file on disk.
+ *
+ * Tolerant of the registry_gap table not existing yet: migration 0006 is run the
+ * same way 0001–0005 are (the SQL editor), and a seed run before that should still
+ * complete the curriculum load rather than failing on a missing table.
+ */
+async function loadRegistryGaps() {
+  let report;
+  try {
+    report = JSON.parse(readFileSync('supabase/seed/readiness_report.json', 'utf8'));
+  } catch {
+    console.log('  .. no readiness_report.json — skipping registry gaps');
+    return;
+  }
+
+  const rows = [];
+  for (const c of report.blocking_hod_decision ?? [])
+    rows.push({ academic_year: YEAR, kind: 'conflict', year_group: c.year_group,
+                subject: c.subject, semester: c.semester, detail: c.needs, files: c.files ?? [] });
+  for (const f of report.could_not_import ?? [])
+    rows.push({ academic_year: YEAR, kind: 'unreadable', year_group: f.year_group ?? null,
+                subject: f.subject ?? null, semester: f.semester ?? null,
+                detail: f.why, files: f.file ? [f.file] : [] });
+  for (const u of report.unclassified ?? [])
+    rows.push({ academic_year: YEAR, kind: 'unclassified', detail: u.why, files: u.file ? [u.file] : [] });
+  for (const e of report.excluded ?? [])
+    rows.push({ academic_year: YEAR, kind: 'excluded', detail: e.why, files: e.file ? [e.file] : [] });
+
+  // Rewrite the year's gaps from scratch: a gap fixed since the last ingest should
+  // disappear, not linger. Any HOD decision already recorded is preserved by the
+  // ingest instead (conflict_resolutions.json), not by this row surviving.
+  const del = await db.from('registry_gap').delete().eq('academic_year', YEAR);
+  if (del.error) {
+    console.log(`  .. registry_gap not loaded (${del.error.message}) — run migration 0006`);
+    return;
+  }
+  const ins = await db.from('registry_gap').insert(rows);
+  if (ins.error) console.log(`  .. registry_gap insert failed: ${ins.error.message}`);
+  else console.log(`  ok registry gaps: ${rows.length} (${report.summary.duplicate_conflicts} conflicts, ${report.summary.unreadable} unreadable)`);
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

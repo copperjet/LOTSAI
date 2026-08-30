@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
-import { generatePlan, RegistryWeek } from '@/lib/planner';
-import { runGate } from '@/lib/gate';
-import { buildGateInput } from '@/lib/gateContext';
+import { RegistryWeek } from '@/lib/planner';
+import * as engine from '@/lib/engine';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -25,6 +24,12 @@ export async function POST(req: NextRequest) {
   const user = await currentUser();
   const { classId, weekNumber, mode, basisArtifactId } = await req.json();
 
+  // The workflow + its Standard drive generation and gating. Falls back to the
+  // built-in weekly_planner config if migration 0007 has not been applied, so the
+  // route behaves identically before and after the engine's tables exist.
+  const workflow = await engine.resolveWorkflow('weekly_planner');
+  const std = workflow.standard;
+
   const { data: klass } = await db.from('klass').select('*').eq('id', classId).single();
   if (!klass) return NextResponse.json({ error: 'Unknown class' }, { status: 404 });
 
@@ -39,6 +44,35 @@ export async function POST(req: NextRequest) {
     .eq('academic_year', '2026-27').eq('semester', reg.semester)
     .eq('week_number', weekNumber).single();
   if (!week) return NextResponse.json({ error: 'No such school week' }, { status: 404 });
+
+  /**
+   * A submitted or approved planner is a record, and this route is destructive:
+   * it upserts the planner back to `draft` and deletes every lesson_entry under
+   * it. On an approved planner that also guts the `shared_artifact` the bank
+   * points at, so a colleague's reuse would silently resolve to nothing.
+   *
+   * `/api/plan/lesson` already refuses to edit a planner in these states. The
+   * same rule has to live here, not only in the caller: /api/plan/match reports
+   * `existing` so the UI can warn, but a route that destroys approved work must
+   * not depend on every future caller remembering to ask first. Same failure as
+   * the draft-destroying bug, one status further on.
+   */
+  const OPEN = ['draft', 'returned'];
+  const { data: prior } = await db.from('planner')
+    .select('id, status, teacher_id, app_user:teacher_id(full_name)')
+    .eq('class_id', classId).eq('school_week', week.id).maybeSingle();
+
+  if (prior && !OPEN.includes(prior.status)) {
+    const who = (prior as unknown as { app_user?: { full_name: string } }).app_user?.full_name;
+    return NextResponse.json({
+      error: 'not_open',
+      message: prior.status === 'approved'
+        ? `This week is already approved${who ? ` for ${who}` : ''}. Regenerating would replace work the department is already reusing. Ask the HOD to return it first.`
+        : `This week has already been submitted${who ? ` by ${who}` : ''} and is waiting on the HOD. It cannot be regenerated until it is returned.`,
+      plannerId: prior.id,
+      status: prior.status,
+    }, { status: 409 });
+  }
 
   const { data: inv } = await db.from('resource_inventory').select('label')
     .eq('subject_id', klass.subject_id).eq('year_group', klass.year_group);
@@ -84,7 +118,7 @@ export async function POST(req: NextRequest) {
       differentiation: r.differentiation, is_recap: r.is_recap,
     }));
   } else {
-    const out = await generatePlan({
+    const out = await engine.generate(std, {
       reg: reg as RegistryWeek,
       periodsPerWeek: klass.periods_per_week,
       weekCommencing: week.week_commencing,
@@ -114,7 +148,7 @@ export async function POST(req: NextRequest) {
     await db.rpc('bump_artifact', { p_id: basisArtifactId, p_mode: mode });
   }
 
-  const gate = await runGate(await buildGateInput(planner!.id), user.id);
+  const gate = await engine.gate(std, planner!.id, user.id);
 
   await db.from('gate_result').insert({
     planner_id: planner!.id, checks: gate.checks,
