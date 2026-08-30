@@ -17,7 +17,7 @@ export default async function Gate({ searchParams }: {
   return (
     <div className="gatepage">
       <form className="gatecard" method="post" action="/api/gate">
-        <img src={CREST} alt="Lusaka Oaktree School crest" />
+        <img src={CREST} alt="LOTS AI" />
         <h1>LOTS AI</h1>
         <p>Weekly planning and lesson evaluation, for Lusaka Oaktree School.</p>
 

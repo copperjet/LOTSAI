@@ -946,7 +946,7 @@ export default function App() {
     <div className="app">
       <nav className={`rail ${mini ? 'mini' : ''}`}>
         <div className="top">
-          <img src={CREST} alt="Lusaka Oaktree School crest" />
+          <img src={CREST} alt="LOTS AI" />
           <div className="wordmark"><b>LOTS AI</b><small>Lusaka Oaktree</small></div>
           <div className="tacts">
             <button className="railtog" onClick={() => setPalette(true)} title="Search (Ctrl+K)"
