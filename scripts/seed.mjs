@@ -120,13 +120,57 @@ async function main() {
       source_file: r.source_file,
     }));
 
+  // One row per week is what the table allows, but an overview may legitimately
+  // carry two units in the same week — CP4 English runs Historical stories and
+  // Poems side by side. Those arrive as separate rows out of the ingest and
+  // collide on the key, so they are merged into the one week they describe.
+  //
+  // Two *different files* claiming the same week is a different thing entirely:
+  // that is the conflict the sign-off gate exists for, and guessing a winner
+  // there would be exactly the confident wrongness this system is meant to
+  // avoid. So it keeps the fuller row and says out loud that it did.
+  const merged = new Map();
+  const conflicts = [];
+
+  for (const w of weeks) {
+    const key = `${w.year_group}|${w.subject_id}|${w.week_number}`;
+    const seen = merged.get(key);
+    if (!seen) { merged.set(key, w); continue; }
+
+    if (seen.source_file === w.source_file) {
+      const dedupe = (a, b, of) => {
+        const out = [...a];
+        for (const item of b) if (!out.some(x => of(x) === of(item))) out.push(item);
+        return out;
+      };
+      seen.topic_label = seen.topic_label === w.topic_label
+        ? seen.topic_label
+        : `${seen.topic_label} · ${w.topic_label}`;
+      seen.objectives = dedupe(seen.objectives, w.objectives, o => `${o.ref ?? ''}|${o.text}`);
+      seen.activities = dedupe(seen.activities, w.activities, x => String(x));
+      seen.resources  = dedupe(seen.resources,  w.resources,  x => String(x));
+    } else {
+      const richer = w.objectives.filter(o => o.ref).length > seen.objectives.filter(o => o.ref).length
+        || (w.objectives.length > seen.objectives.length
+            && w.objectives.filter(o => o.ref).length === seen.objectives.filter(o => o.ref).length);
+      conflicts.push(`${key}: kept ${(richer ? w : seen).source_file}, ignored ${(richer ? seen : w).source_file}`);
+      if (richer) merged.set(key, w);
+    }
+  }
+
+  const registry = [...merged.values()];
+  if (weeks.length !== registry.length) {
+    console.log(`  .. ${weeks.length - registry.length} same-week rows merged (parallel units in one overview)`);
+  }
+  for (const c of conflicts) console.log(`  ! two files claim ${c}`);
+
   await db.from('curriculum_week')
-    .upsert(weeks, { onConflict: 'academic_year,year_group,subject_id,semester,week_number' })
-    .then(ok(`curriculum: ${weeks.length} weeks`));
+    .upsert(registry, { onConflict: 'academic_year,year_group,subject_id,semester,week_number' })
+    .then(ok(`curriculum: ${registry.length} weeks`));
 
   // Sign off only what a HOD could honestly sign off: the weeks that carry
   // Cambridge references. Everything else stays blocked, visibly, on purpose.
-  const signable = weeks.filter(w => w.objectives.some(o => o.ref));
+  const signable = registry.filter(w => w.objectives.some(o => o.ref));
   for (const w of signable) {
     await db.from('curriculum_week').update({
       signed_off_by: uid('J. Zulu'), signed_off_at: new Date().toISOString(),
@@ -136,7 +180,7 @@ async function main() {
     });
   }
   console.log(`  ok signed off ${signable.length} weeks that carry syllabus references`);
-  console.log(`     ${weeks.length - signable.length} weeks stay blocked — their overviews have no codes`);
+  console.log(`     ${registry.length - signable.length} weeks stay blocked — their overviews have no codes`);
 
   const coded = new Set(signable.map(w => `${w.year_group} ${w.subject_id}`));
   console.log(`\nplannable now: ${[...coded].join(', ') || 'nothing'}`);
