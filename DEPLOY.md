@@ -1,6 +1,6 @@
-# Deploying to lotsai.igaprep.com
+# Deploying to lotsai.dennysepiso.com
 
-Target: **https://lotsai.igaprep.com**, on Vercel, functions pinned to `cpt1` (Cape Town) — the
+Target: **https://lotsai.dennysepiso.com**, on Vercel, functions pinned to `cpt1` (Cape Town) — the
 closest Vercel region to Lusaka, and the difference between a plan appearing in two seconds and in
 five.
 
@@ -8,36 +8,41 @@ five.
 
 | | |
 |---|---|
-| `igaprep.com` nameservers | `ns1.vercel-dns.com`, `ns2.vercel-dns.com` — already on Vercel |
-| `lotsai.igaprep.com` | already resolves to Vercel (216.198.79.1 / .65) |
-| Vercel account holding the domain | **not** `copperjets-projects` — that team holds only escholr.com and codarti.com |
-| Supabase project | not created yet |
+| Vercel project | `copperjets-projects/lots-ai` |
+| Production URLs | `lotsai.dennysepiso.com` and `lots-ai.vercel.app`, both aliased to the newest production deployment |
+| How a deploy happens | pushing `main` to `github.com/copperjet/LOTSAI`; the Git integration builds and promotes it. `vercel --prod` also works. |
+| Supabase project | created, migrations through 0010 applied |
+| Model calls | real. Production has `LLM_PROVIDER=openai` and `OPENAI_API_KEY`, and no `MOCK_LLM`. |
+| Google Drive | mocked, because `GOOGLE_SERVICE_ACCOUNT_JSON` is unset. `driveMocked()` treats a missing credential as mock, so nothing is uploaded and approval still succeeds. |
 | Anthropic credits | not available — the card keeps failing, so the app runs on OpenAI (`LLM_PROVIDER=openai`) |
 
-## 1. Sign the CLI into the account that owns igaprep.com
+`lotsai.igaprep.com` was the original target and is **not** part of this project. That domain is not
+in the `copperjets-projects` team and 404s; do not point anything at it.
+
+## 1. Sign the CLI into the account that owns the project
 
 ```bash
 vercel login
 ```
 
-Then confirm the domain is visible to that account:
+Then confirm you are in the right team:
 
 ```bash
 vercel domains ls
 ```
 
-`igaprep.com` must appear. If it does not, the CLI is in the wrong account or the wrong team — use
-`vercel switch` to pick the team that holds it.
+`dennysepiso.com` must appear. If it does not, the CLI is in the wrong account or the wrong team —
+use `vercel switch` to pick `copperjets-projects`.
 
 ## 2. Create the Supabase project
 
-At supabase.com, create a project in the region closest to Zambia (`eu-central-1` or
-`af-south-1` where offered). Then, in its SQL editor, run in order:
+Already done for the live site; this is what to repeat for a new environment.
 
-- `supabase/migrations/0001_init.sql`
-- `supabase/migrations/0002_functions.sql`
-- `supabase/migrations/0003_edits.sql`
-- `supabase/migrations/0004_usage_provider.sql`
+At supabase.com, create a project in the region closest to Zambia (`eu-central-1` or
+`af-south-1` where offered). Then, in its SQL editor, run every file in
+`supabase/migrations/` in numerical order, `0001_init.sql` through `0010_worksheet.sql`. There is
+no migration runner: the DDL is applied by hand, so a new environment is only as current as the
+last file somebody ran.
 
 Take three values from **Project Settings → API**: the project URL, the anon key, and the service
 role key.
@@ -88,16 +93,18 @@ vercel link
 vercel --prod
 ```
 
-## 5. Attach the domain
+## 5. The domain
+
+`lotsai.dennysepiso.com` is already attached and aliased to production, so there is nothing to do
+here on an existing deployment. Confirm with:
 
 ```bash
-vercel domains add lotsai.igaprep.com
+vercel alias ls
 ```
 
-Because `igaprep.com` is already on Vercel nameservers in that account, the record is created for
-you and the certificate issues within a minute or two. `lotsai.igaprep.com` currently resolves to
-Vercel already, so if it is attached to a different project there, detach it first — the same
-hostname cannot serve two projects.
+To move the site to a different hostname later, `vercel domains add <host>` in this team; the record
+and certificate are created for you within a minute or two. The same hostname cannot serve two
+projects, so detach it from the old one first.
 
 ## The password gate
 
@@ -122,24 +129,29 @@ The whole mechanism is `middleware.ts`, `lib/sitegate.ts`, `app/gate/page.tsx` a
 
 ## Checks after the first deploy
 
-1. `https://lotsai.igaprep.com` redirects to `/gate`.
+1. `https://lotsai.dennysepiso.com` redirects to `/gate`.
 2. A wrong password is refused; the right one lets you through and stays through a reload.
-3. `curl -s -o /dev/null -w '%{http_code}' https://lotsai.igaprep.com/api/agenda` is `307`, not
+3. `curl -s -o /dev/null -w '%{http_code}' https://lotsai.dennysepiso.com/api/agenda` is `307`, not
    `200` — the API is behind the gate too.
 4. Signed in, the agenda loads and the today box lists the week's work.
 5. Plan a week, edit a methodology cell, reload: the edit persisted, and `select count(*) from
    edit_event;` in Supabase is 1.
 6. `select workflow, provider, model from ai_usage;` shows rows for every call — metering is on the
    path even in mock mode, where provider and model are both `mock`.
+7. Upload a `.pdf` and a `.docx` and reconcile them. This is worth checking on the deployment
+   specifically: pdfjs loads its worker through a computed dynamic `import()` that Next's tracer
+   cannot follow, so the file has to be named in `outputFileTracingIncludes` (`next.config.mjs`) or
+   every PDF fails in the lambda while working locally.
 
-## Going live on the real API
+## The mock switch
 
-Set `OPENAI_API_KEY` and `LLM_PROVIDER=openai`, then remove the mock switch and redeploy.
+Production is **already on the real API**: `LLM_PROVIDER=openai` and `OPENAI_API_KEY` are set and
+neither `MOCK_LLM` nor `MOCK_CLAUDE` is. Every teacher action spends real credit.
 
-The mock switch was renamed from `MOCK_CLAUDE` to `MOCK_LLM`, and both are honoured. Order matters on
-a site already running on fixtures: add `MOCK_LLM` **first**, deploy, confirm the site still serves
-fixtures, and only then remove `MOCK_CLAUDE`. Removing the old name first would take production from
-fixtures to real API calls in the gap between the two commands.
+To put it back on fixtures, set `MOCK_LLM=1`. Both names are honoured, `MOCK_CLAUDE` being the older
+one. Order matters when moving a live site the other way: add `MOCK_LLM` **first**, deploy, confirm
+the site still serves fixtures, and only then remove `MOCK_CLAUDE`. Removing the old name first
+would take production from fixtures to real API calls in the gap between the two commands.
 
 Then watch `ai_usage`: if `cached_tokens` is zero on a second generation for the same subject and
 week, the cache prefix has drifted and the cost model in Addendum D §D8 no longer holds. The OpenAI

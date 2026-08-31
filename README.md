@@ -68,7 +68,7 @@ PDF as unreadable, rather than failing to start.
 
 ### 5. Deploying
 
-The target is **lotsai.igaprep.com** on Vercel, functions pinned to Cape Town. Steps, environment
+The target is **lotsai.dennysepiso.com** on Vercel, functions pinned to Cape Town. Steps, environment
 variables and the shared-password gate that stands in for sign-in are in [DEPLOY.md](DEPLOY.md).
 
 ### 6. Run
