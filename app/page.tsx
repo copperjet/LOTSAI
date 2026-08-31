@@ -154,7 +154,11 @@ export default function App() {
   const said = (text: string) => setTurns(t => [...t, { who: 'user', text }]);
 
   const loadAgenda = useCallback(async () => {
-    const r = await fetch('/api/agenda').then(r => r.json());
+    const res = await fetch('/api/agenda');
+    // The session ended while the tab was open, or thirty days passed. Back to
+    // the door rather than an empty screen that never explains itself.
+    if (res.status === 401) { window.location.href = '/signin'; return []; }
+    const r = await res.json();
     setAgenda(r.items); setUser(r.user);
     setToday(r.today ?? []); setTodayDate(r.date ?? '');
     return r.items as AgendaItem[];

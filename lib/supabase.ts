@@ -30,6 +30,10 @@ export function anon(): SupabaseClient {
   );
 }
 
+/** Thrown when the cookie is gone, forged, expired or revoked. Callers turn
+ *  it into a 401 and the browser goes back to /signin. */
+export const NOT_SIGNED_IN = 'not_signed_in';
+
 export interface AppUser {
   id: string; email: string; full_name: string; role: string; department: string | null;
 }
@@ -76,7 +80,7 @@ export async function currentUser(emailOverride?: string): Promise<AppUser> {
   }
 
   const email = emailOverride ?? process.env.DEMO_USER_EMAIL;
-  if (!email || process.env.NODE_ENV === 'production') throw new Error('Not signed in');
+  if (!email || process.env.NODE_ENV === 'production') throw new Error(NOT_SIGNED_IN);
 
   const { data, error } = await db.from('app_user').select('*').eq('email', email).single();
   if (error) throw new Error(`No app_user for ${email}. Run npm run seed.`);

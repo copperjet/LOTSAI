@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { admin, currentUser } from '@/lib/supabase';
+import { admin, currentUser, NOT_SIGNED_IN } from '@/lib/supabase';
 
 export const runtime = 'nodejs';
 
@@ -36,7 +36,16 @@ const DONE_STATUSES = ['submitted', 'reviewed', 'approved'];
 
 export async function GET() {
   const db = admin();
-  const user = await currentUser();
+
+  let user;
+  try {
+    user = await currentUser();
+  } catch (e) {
+    if (e instanceof Error && e.message === NOT_SIGNED_IN) {
+      return NextResponse.json({ error: NOT_SIGNED_IN }, { status: 401 });
+    }
+    throw e;
+  }
   const today = new Date().toISOString().slice(0, 10);
 
   const items: AgendaItem[] = [];
@@ -164,7 +173,7 @@ export async function GET() {
       also: `${blocked.size} subject${blocked.size === 1 ? '' : 's'} still need your curriculum sign-off`,
       act: 'Resolve them', alt: 'Sort the curriculum first', intent: 'registry',
       title: `${blocked.size} subjects not signed off`,
-      note: 'Planning stays disabled for these until you sign them off', when: 'Blocking',
+      note: 'Nobody can plan these until you sign them off', when: 'Blocking',
     });
 
     if (queue?.length) items.push({
