@@ -185,6 +185,23 @@ export function mockOcr() {
   ].join('\n');
 }
 
+/**
+ * A question answered from the school's records.
+ *
+ * `kind: 'records'` on purpose: it is the branch that renders as a plain answer,
+ * so the fixture exercises the path a teacher actually sees rather than the two
+ * that decline. The other two kinds are one field apart and are covered by
+ * asking for real.
+ */
+export function mockAsk(prompt: string) {
+  const q = (prompt.split('THE QUESTION:')[1] ?? prompt).trim();
+  return {
+    kind: 'records',
+    answer: `The school opens on Monday 24 August 2026, the first teaching week of Semester 1. `
+      + `(Fixture answer, standing in for: ${q.slice(0, 80)})`,
+  };
+}
+
 /** Routed on CallOpts.workflow. Anything unknown gets an empty object. */
 export function mockFor(workflow: string, cached: string, prompt: string): unknown {
   if (workflow === 'planner_create' || workflow === 'planner_adapt') return mockPlan(cached, prompt);
@@ -195,5 +212,6 @@ export function mockFor(workflow: string, cached: string, prompt: string): unkno
   // Plain text, not JSON: the OCR call has no schema, so lib/llm.ts returns
   // whatever the fixture is verbatim.
   if (workflow === 'ocr_extract') return mockOcr();
+  if (workflow === 'school_question') return mockAsk(prompt);
   return {};
 }

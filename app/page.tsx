@@ -104,6 +104,7 @@ const PHASES: Record<string, string[]> = {
   packPdf:   ['Laying it out for print.', 'Putting the answer key at the end.'],
   evaluate:  ['Writing that up for your planner.', 'Tagging the objectives.'],
   approve:   ['Filing it in the shared bank.', 'Sending the PDF to your Drive folder.'],
+  ask:       ['Let me have a look.'],
 };
 
 /** Advance a phase list every six seconds, holding on the last line. */
@@ -270,7 +271,42 @@ export default function App() {
     if (/review|approve|queue/.test(q)) return doReview();
     if (/registry|conflict|sign.?off/.test(q)) return doRegistry();
     if (/coverage/.test(q)) return doCoverage();
-    return boundary();
+    // Nothing above started a workflow, which does not make this open-ended work.
+    // The school's own calendar and registry answer a great many questions, and
+    // refusing those was the router having no answer rather than the product
+    // having a limit (lib/ask.ts).
+    return doAsk(text);
+  }
+
+  /**
+   * A question, rather than a request to do something.
+   *
+   * Three replies: an answer from the school's records, an answer that is not
+   * from them and says so, and - for open-ended work - the boundary that was
+   * always the right response to that.
+   */
+  async function doAsk(question: string) {
+    setBusyPhases(PHASES.ask);
+    const r = await fetch('/api/ask', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question }),
+    }).then(r => r.json()).catch(() => ({ error: 'offline' }));
+    setBusy(null);
+
+    if (r.error) {
+      return say(<div className="bound"><p style={{ fontSize: 14 }}>
+        I could not answer that just now. Try again in a moment.
+      </p></div>);
+    }
+    meter(r.usage);
+    if (r.kind === 'open_ended' || !r.answer) return boundary();
+    if (r.kind === 'general') {
+      return say(<div className="c pad">
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Not from the school&rsquo;s records</div>
+        <p style={{ fontSize: 14.5, margin: 0 }}>{r.answer}</p>
+      </div>);
+    }
+    say(<p className="said">{r.answer}</p>);
   }
 
   function toggleRail() {
