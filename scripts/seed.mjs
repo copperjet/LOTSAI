@@ -41,9 +41,9 @@ const SUBJECT_BY_NAME = {
 
 const PEOPLE = [
   { email: process.env.DEMO_USER_EMAIL ?? 'teacher.b@lusakaoaktree.school',
-    full_name: 'M. Banda', role: 'teacher', department: 'Primary' },
-  { email: 'teacher.a@lusakaoaktree.school', full_name: 'T. Phiri', role: 'teacher', department: 'Primary' },
-  { email: 'hod.primary@lusakaoaktree.school', full_name: 'J. Zulu', role: 'hod', department: 'Primary' },
+    full_name: 'Victor Mwaekwa', role: 'teacher', department: 'Primary' },
+  { email: 'teacher.a@lusakaoaktree.school', full_name: 'Richard Mwanza', role: 'teacher', department: 'Primary' },
+  { email: 'hod.primary@lusakaoaktree.school', full_name: 'Denny Sepiso', role: 'hod', department: 'Primary' },
   // The admin role passes every reviewer check and, since /admin, opens the
   // dashboard as well. Nobody held it before, so nobody could reach it.
   // No PIN is seeded: the first sign-in chooses one.
@@ -88,16 +88,16 @@ async function main() {
   const uid = (n) => users.find(u => u.full_name === n)?.id;
 
   await db.from('klass').upsert([
-    { id: 'CP4A-MATH', name: 'CP4A Mathematics', year_group: 'CP4', subject_id: 'MATH', teacher_id: uid('T. Phiri'), periods_per_week: 5 },
-    { id: 'CP4B-MATH', name: 'CP4B Mathematics', year_group: 'CP4', subject_id: 'MATH', teacher_id: uid('M. Banda'), periods_per_week: 5 },
-    { id: 'CP4A-SCI',  name: 'CP4A Science',     year_group: 'CP4', subject_id: 'SCI',  teacher_id: uid('T. Phiri'), periods_per_week: 3 },
-    { id: 'CP4B-SCI',  name: 'CP4B Science',     year_group: 'CP4', subject_id: 'SCI',  teacher_id: uid('M. Banda'), periods_per_week: 3 },
+    { id: 'CP4A-MATH', name: 'CP4A Mathematics', year_group: 'CP4', subject_id: 'MATH', teacher_id: uid('Richard Mwanza'), periods_per_week: 5 },
+    { id: 'CP4B-MATH', name: 'CP4B Mathematics', year_group: 'CP4', subject_id: 'MATH', teacher_id: uid('Victor Mwaekwa'), periods_per_week: 5 },
+    { id: 'CP4A-SCI',  name: 'CP4A Science',     year_group: 'CP4', subject_id: 'SCI',  teacher_id: uid('Richard Mwanza'), periods_per_week: 3 },
+    { id: 'CP4B-SCI',  name: 'CP4B Science',     year_group: 'CP4', subject_id: 'SCI',  teacher_id: uid('Victor Mwaekwa'), periods_per_week: 3 },
     // 27 of the 30 ingested CP4 English weeks carry Cambridge references and sign
     // off same as Math — but no class row taught it, so the registry coverage was
     // unreachable from the app. Periods/week not stated in the overview; matched
     // to CP4A Mathematics pending HOD confirmation.
-    { id: 'CP4A-ENG',  name: 'CP4A English',     year_group: 'CP4', subject_id: 'ENG',  teacher_id: uid('T. Phiri'), periods_per_week: 5 },
-    { id: 'CP4B-ENG',  name: 'CP4B English',     year_group: 'CP4', subject_id: 'ENG',  teacher_id: uid('M. Banda'), periods_per_week: 5 },
+    { id: 'CP4A-ENG',  name: 'CP4A English',     year_group: 'CP4', subject_id: 'ENG',  teacher_id: uid('Richard Mwanza'), periods_per_week: 5 },
+    { id: 'CP4B-ENG',  name: 'CP4B English',     year_group: 'CP4', subject_id: 'ENG',  teacher_id: uid('Victor Mwaekwa'), periods_per_week: 5 },
   ]).then(ok('classes'));
 
   await db.from('resource_inventory')
@@ -183,7 +183,7 @@ async function main() {
   const signable = registry.filter(w => w.objectives.some(o => o.ref));
   for (const w of signable) {
     await db.from('curriculum_week').update({
-      signed_off_by: uid('J. Zulu'), signed_off_at: new Date().toISOString(),
+      signed_off_by: uid('Denny Sepiso'), signed_off_at: new Date().toISOString(),
     }).match({
       academic_year: YEAR, year_group: w.year_group, subject_id: w.subject_id,
       semester: 1, week_number: w.week_number,
