@@ -44,6 +44,10 @@ const PEOPLE = [
     full_name: 'M. Banda', role: 'teacher', department: 'Primary' },
   { email: 'teacher.a@lusakaoaktree.school', full_name: 'T. Phiri', role: 'teacher', department: 'Primary' },
   { email: 'hod.primary@lusakaoaktree.school', full_name: 'J. Zulu', role: 'hod', department: 'Primary' },
+  // The admin role passes every reviewer check and, since /admin, opens the
+  // dashboard as well. Nobody held it before, so nobody could reach it.
+  // No PIN is seeded: the first sign-in chooses one.
+  { email: 'admin@lusakaoaktree.school', full_name: 'School Office', role: 'admin', department: null },
 ];
 
 // From the Resources column the overviews already carry. Confirm with the HOD

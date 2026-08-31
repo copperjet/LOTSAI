@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
   const db = admin();
   const user = await currentUser();
   if (!['hod', 'coordinator', 'principal', 'admin'].includes(user.role)) {
-    return NextResponse.json({ error: 'Only a reviewer can sign off a registry' }, { status: 403 });
+    return NextResponse.json({ error: 'Only a reviewer can sign off the curriculum' }, { status: 403 });
   }
 
   const { action, yearGroup, subjectId } = await req.json();

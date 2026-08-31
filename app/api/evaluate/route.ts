@@ -76,6 +76,5 @@ export async function POST(req: NextRequest) {
     landed: result.landed,
     flagged: result.flagged,
     question: result.clarifying_question ?? null,
-    usage: result.usage,
   });
 }

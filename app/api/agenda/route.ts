@@ -146,7 +146,7 @@ export async function GET() {
 
     items.push({
       id: 'bank', kind: 'done',
-      lead: 'Nothing is outstanding - next week&rsquo;s drafts are already staged',
+      lead: 'Nothing is outstanding - next week’s drafts are already waiting',
       act: 'See what your year group has made', alt: 'See the shared bank', intent: 'bank',
       title: 'Shared bank', note: 'Everything your colleagues have had approved', when: 'Live',
     });
@@ -160,9 +160,9 @@ export async function GET() {
 
     if (blocked.size) items.push({
       id: 'registry', kind: 'late',
-      lead: `${blocked.size} subject${blocked.size === 1 ? '' : 's'} ${blocked.size === 1 ? 'is' : 'are'} waiting on your registry sign-off`,
-      also: `${blocked.size} subject${blocked.size === 1 ? '' : 's'} still need your registry sign-off`,
-      act: 'Resolve them', alt: 'Sort the registry first', intent: 'registry',
+      lead: `${blocked.size} subject${blocked.size === 1 ? '' : 's'} ${blocked.size === 1 ? 'is' : 'are'} waiting on your curriculum sign-off`,
+      also: `${blocked.size} subject${blocked.size === 1 ? '' : 's'} still need your curriculum sign-off`,
+      act: 'Resolve them', alt: 'Sort the curriculum first', intent: 'registry',
       title: `${blocked.size} subjects not signed off`,
       note: 'Planning stays disabled for these until you sign them off', when: 'Blocking',
     });
@@ -173,14 +173,14 @@ export async function GET() {
       also: `${queue.length} planner${queue.length === 1 ? '' : 's'} ${queue.length === 1 ? 'is' : 'are'} also waiting`,
       act: 'Open it', q: 'Shall I open it?', alt: 'Review the planner first', intent: 'review',
       title: `${queue.length} planners awaiting review`,
-      note: 'Gate results already attached', when: 'Today',
+      note: 'Checks already done', when: 'Today',
     });
 
     tasks.push({
       id: 'review',
       label: 'Review the submitted planners',
       note: queue?.length
-        ? `${queue.length} waiting, gate results already attached`
+        ? `${queue.length} waiting, checks already done`
         : 'The queue is clear',
       done: !queue?.length,
       intent: 'review',
@@ -188,7 +188,7 @@ export async function GET() {
 
     tasks.push({
       id: 'registry',
-      label: 'Sign off the curriculum registry',
+      label: 'Sign off the curriculum',
       note: blocked.size
         ? `${blocked.size} subject${blocked.size === 1 ? '' : 's'} still blocking planning`
         : 'Every subject is signed off',

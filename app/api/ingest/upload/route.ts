@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     const kind = kindOf(file);
     if (!kind) {
       return NextResponse.json({
-        error: `${file.name}: only .pdf, .docx and photographs (PNG, JPEG, WebP) are supported.`,
+        error: `${file.name} is not a kind of file I can read. Send a PDF, a Word document, or a photograph.`,
       }, { status: 415 });
     }
     if (kind === 'image' && file.size > MAX_IMAGE_BYTES) {
@@ -73,8 +73,10 @@ export async function POST(req: NextRequest) {
         : kind === 'docx' ? await extractDocx(bytes)
         : (await extractTextFromImage(bytes, file.type, user.id)).text;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return NextResponse.json({ error: `Could not read ${file.name}: ${msg}` }, { status: 422 });
+      console.error(`[upload] ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+      return NextResponse.json({
+        error: `${file.name} could not be read. If it is a photograph, take it again in better light.`,
+      }, { status: 422 });
     }
     texts.push(text);
     parts.push({ filename: file.name, kind, textLength: text.length });
@@ -122,12 +124,12 @@ function kindOf(file: File): Kind | null {
 function noteFor(unresolved: number, found: number, fileCount: number, yearGroup: string, subjectId: string) {
   const from = fileCount === 1 ? 'this file' : `these ${fileCount} files`;
   if (!found) {
-    return `No objective codes were found in ${from}. Nothing can be built from it until a code the ${yearGroup} ${subjectId} registry holds appears in it.`;
+    return `No objectives were found in ${from}. Nothing can be built from it until it names objectives the ${yearGroup} ${subjectId} curriculum holds.`;
   }
   if (unresolved) {
-    return `${unresolved} objective code(s) in ${from} are not in the ${yearGroup} ${subjectId} registry. They will not be used until a human confirms them.`;
+    return `${unresolved} objective(s) in ${from} are not in the ${yearGroup} ${subjectId} curriculum. They will not be used until someone confirms them.`;
   }
-  return `Every objective code in ${from} resolves against the registry.`;
+  return `Every objective in ${from} is in the curriculum.`;
 }
 
 /** PDF text via pdfjs (legacy build runs in Node; no worker needed for text). */

@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     .eq('year_group', klass.year_group).eq('subject_id', klass.subject_id)
     .eq('week_number', weekNumber).eq('academic_year', '2026-27').single();
   if (!reg?.signed_off_at) {
-    return NextResponse.json({ error: 'Registry not signed off for this subject' }, { status: 409 });
+    return NextResponse.json({ error: 'not_signed_off', message: 'This subject is still waiting to be signed off for the semester.' }, { status: 409 });
   }
 
   const { data: week } = await db.from('school_week').select('*')
@@ -109,7 +109,6 @@ export async function POST(req: NextRequest) {
   };
 
   let lessons: LessonRow[];
-  let usage = null;
 
   if (mode === 'reuse' && basisRows.length) {
     lessons = basisRows.map((r, position) => ({
@@ -125,7 +124,6 @@ export async function POST(req: NextRequest) {
       inventory, flagged, basis,
     }, user.id);
     lessons = out.lessons as LessonRow[];
-    usage = out.usage;
   }
 
   const { data: planner } = await db.from('planner').upsert({
@@ -156,5 +154,5 @@ export async function POST(req: NextRequest) {
   });
   await audit(user.id, `plan.${mode}`, 'planner', planner!.id);
 
-  return NextResponse.json({ plannerId: planner!.id, mode, status: 'draft', lessons: stored, gate, usage });
+  return NextResponse.json({ plannerId: planner!.id, mode, status: 'draft', lessons: stored, gate });
 }

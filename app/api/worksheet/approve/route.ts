@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   if (!stored.ok || !stored.path) {
     return NextResponse.json({
       error: 'render_failed',
-      message: `The worksheet PDF could not be rendered, so nothing was sent to Drive.${stored.error ? ` (${stored.error})` : ''}`,
+      message: 'The worksheet could not be prepared, so nothing was sent to Drive. Everything is saved.',
     }, { status: 500 });
   }
   const bytes = await readArtefact(stored.path);
@@ -79,7 +79,11 @@ export async function POST(req: NextRequest) {
     bytes, contentType: 'application/pdf',
   });
   if (!drive.ok) {
-    return NextResponse.json({ error: 'drive_failed', message: `The worksheet was not sent to Drive: ${drive.error}` }, { status: 502 });
+    console.error(`[drive] worksheet ${worksheetId}: ${drive.error}`);
+    return NextResponse.json({
+      error: 'drive_failed',
+      message: 'The worksheet is saved and approved, but it could not be copied to the school Drive yet.',
+    }, { status: 502 });
   }
 
   await db.from('worksheet').update({

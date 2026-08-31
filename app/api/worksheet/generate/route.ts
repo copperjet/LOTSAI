@@ -36,13 +36,13 @@ export async function POST(req: NextRequest) {
 
   if (!week) {
     return NextResponse.json({ blocked: 'no_registry',
-      message: `The registry holds nothing for ${klass.year_group} ${klass.subject_id}, week ${weekNumber}.` });
+      message: `The curriculum has nothing for ${klass.year_group} ${klass.subject_id}, week ${weekNumber} yet.` });
   }
   // A worksheet is built only from a signed-off week (Addendum C §C7), the same
   // rule the study pack follows.
   if (!week.signed_off_at) {
     return NextResponse.json({ blocked: 'not_signed_off',
-      message: `Week ${weekNumber} of ${klass.year_group} ${klass.subject_id} is not signed off. A worksheet is built only from a signed-off week.` });
+      message: `Week ${weekNumber} of ${klass.year_group} ${klass.subject_id} is waiting for a Head of Department to sign it off. Worksheets are only built from weeks that have been.` });
   }
 
   const grounding: RegistryWeekLite = {
@@ -78,7 +78,6 @@ export async function POST(req: NextRequest) {
     tasks: content.tasks.length,
     refs: content.objective_refs,
     render,
-    usage: out.usage,
   });
 }
 

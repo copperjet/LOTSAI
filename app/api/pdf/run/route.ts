@@ -34,14 +34,14 @@ export async function GET(req: NextRequest) {
   const storagePath = job?.storage_path ?? path;
   return NextResponse.json({
     status: job?.status ?? 'unknown', path: storagePath,
-    url: viewUrl('planner', plannerId), error: job?.last_error ?? null,
+    url: viewUrl('planner', plannerId), error: job?.status === 'failed' ? 'render_failed' : null,
   });
 }
 
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!['hod', 'coordinator', 'principal', 'admin'].includes(user.role)) {
-    return NextResponse.json({ error: 'Only a reviewer can re-render an artefact' }, { status: 403 });
+    return NextResponse.json({ error: 'Only a reviewer can prepare this again' }, { status: 403 });
   }
   const { plannerId } = await req.json();
   if (!plannerId) return NextResponse.json({ error: 'plannerId required' }, { status: 400 });

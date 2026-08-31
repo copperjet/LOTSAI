@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
   if (!stored.ok || !stored.path) {
     return NextResponse.json({
       error: 'render_failed',
-      message: `The printable PDF could not be rendered, so nothing was sent to Drive.${stored.error ? ` (${stored.error})` : ''}`,
+      message: 'The printable version could not be prepared, so nothing was sent to Drive. Everything is saved.',
     }, { status: 500 });
   }
   const bytes = await readArtefact(stored.path);
@@ -99,7 +99,11 @@ export async function POST(req: NextRequest) {
     bytes, contentType: 'application/pdf',
   });
   if (!drive.ok) {
-    return NextResponse.json({ error: 'drive_failed', message: `The pack was not sent to Drive: ${drive.error}` }, { status: 502 });
+    console.error(`[drive] study pack ${studyPackId}: ${drive.error}`);
+    return NextResponse.json({
+      error: 'drive_failed',
+      message: 'The pack is saved and approved, but it could not be copied to the school Drive yet.',
+    }, { status: 502 });
   }
 
   // Core approval always applies. The drive_* columns are best-effort so approval

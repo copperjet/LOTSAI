@@ -6,7 +6,7 @@ import { FORMAT } from '@/lib/pdf/store';
 export const runtime = 'nodejs';
 
 /**
- * GET /api/artefact/view?kind=<kind>&id=<uuid>
+ * GET /api/document/view?kind=<kind>&id=<uuid>
  *
  * Serve a stored artefact's bytes from our own domain.
  *
@@ -98,7 +98,7 @@ function notRendered() {
     + '<title>Not ready yet</title>'
     + '<style>body{font:16px/1.6 system-ui,sans-serif;color:#26302A;margin:15vh auto;max-width:34rem;padding:0 1.5rem}</style>'
     + '</head><body><h1>Not ready yet</h1>'
-    + '<p>This artefact has not finished rendering. It is saved either way - close this tab and try again in a moment.</p>'
+    + '<p>This is saved, but it is not quite ready to open. Close this tab and try again in a moment.</p>'
     + '</body></html>',
     { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
   );

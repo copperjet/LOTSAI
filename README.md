@@ -295,7 +295,9 @@ app/
   api/
     agenda/             what is outstanding, most urgent first
     calendar/           every teaching week, and what each class already has against it
-    whoami/             demo user switching, until Google Workspace SSO lands
+    signin/             set or check a personal PIN, and open a session
+    signout/            end this device's session
+    admin/              the few things the admin dashboard can change
     plan/match/         search before generate. No model call.
     plan/generate/      create, adapt or reuse, then run the gate
     plan/lesson/        edit one field in place, record it, re-run the gate

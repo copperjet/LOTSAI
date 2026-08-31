@@ -73,7 +73,6 @@ export async function POST(req: NextRequest) {
     refs: content.objective_refs,
     glossary: content.glossary.length,
     render,
-    usage: out.usage,
   });
 }
 
@@ -98,6 +97,6 @@ export async function GET(req: NextRequest) {
   const path = pack?.storage_path ?? `study_pack/${id}.html`;
   // Our own route, not a signed storage URL: Supabase serves stored .html as
   // text/plain, which printed the source instead of the page (see
-  // app/api/artefact/view/route.ts).
+  // app/api/document/view/route.ts).
   return NextResponse.json({ title: pack?.title ?? null, path, url: viewUrl('studypack-html', id) });
 }

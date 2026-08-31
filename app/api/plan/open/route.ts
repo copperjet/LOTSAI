@@ -46,6 +46,5 @@ export async function GET(req: NextRequest) {
     gate: gate
       ? { ...gate, passed: (gate.checks as { status: string }[]).filter(c => c.status === 'pass').length }
       : { checks: [], blocking: 0, warnings: 0, passed: 0 },
-    usage: null,
   });
 }

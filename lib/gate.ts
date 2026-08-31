@@ -37,9 +37,9 @@ export function deterministic(i: GateInput): Check[] {
 
   const unknown = refs.filter(r => !i.registryRefs.includes(r));
   out.push(unknown.length
-    ? { id: 'refs', status: 'block', title: 'An objective reference is not in the registry',
-        detail: `${unknown.join(', ')} - the model may not invent references. Check the registry for this week.` }
-    : { id: 'refs', status: 'pass', title: 'Every syllabus reference resolves in the registry',
+    ? { id: 'refs', status: 'block', title: 'An objective is not in the curriculum',
+        detail: `${unknown.join(', ')} - I only use objectives the school's curriculum holds, and these are not in it. Check the week.` }
+    : { id: 'refs', status: 'pass', title: 'Every objective is in the curriculum',
         detail: refs.length ? `${[...new Set(refs)].join(', ')} found.`
                             : 'This week is topic-only - the overview states objectives in prose, with no codes.' });
 
@@ -86,9 +86,9 @@ export function deterministic(i: GateInput): Check[] {
   const named = i.classRoll.filter(n => n.length > 3 && blob.includes(n.toLowerCase()));
   out.push(named.length
     ? { id: 'names', status: 'block', title: 'A learner name appears in the plan',
-        detail: 'v1 holds no identifiable learner data. Remove the name before submitting.' }
+        detail: 'Please take the name out before you submit. Plans never hold a pupil’s name.' }
     : { id: 'names', status: 'pass', title: 'No learner names present',
-        detail: 'Checked against the class roll. A data-protection control, not a style rule.' });
+        detail: 'Checked against the class list.' });
 
   const recapped = i.lessons.some(l => l.is_recap || l.objectives.some(o => o.ref && i.flaggedLastWeeks.includes(o.ref)));
   if (i.flaggedLastWeeks.length) out.push(recapped

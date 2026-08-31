@@ -48,6 +48,7 @@ body{margin:0;background:transparent;color:var(--ink);font-family:var(--body);li
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.01ms !important;transition-duration:.01ms !important;}
   .ambience{display:none;}
+  .sproutbg video{display:none;}
 }
 h1,h2,h3,h4{font-family:var(--display);font-weight:750;margin:0;text-wrap:balance;letter-spacing:-.02em;}
 h1{font-weight:800;}
@@ -78,7 +79,7 @@ code{font-family:ui-monospace,'Cascadia Mono',Menlo,monospace;}
 .rail.mini .scroll,
 .rail.mini .conn span,
 .rail.mini .acct .nm,
-.rail.mini .railsel,
+
 .rail.mini .sr{display:none;}
 .rail.mini .top{flex-direction:column;padding:12px 0 8px;gap:6px;}
 .rail.mini .tacts{margin-left:0;flex-direction:column;gap:4px;}
@@ -106,11 +107,11 @@ code{font-family:ui-monospace,'Cascadia Mono',Menlo,monospace;}
 .av{width:29px;height:29px;border-radius:50%;background:var(--forest);color:#FFFDF8;display:grid;place-items:center;
   font-size:12px;font-weight:700;flex-shrink:0;}
 .acct .nm{text-align:left;min-width:0;flex:1;}
+/* Quiet, and last: signing out is not a thing anyone comes to the rail to do. */
+.signout{font-size:11.5px;color:var(--muted);padding:4px 7px;border-radius:9px;flex-shrink:0;transition:.12s;}
+.signout:hover{background:var(--sunk);color:var(--ink);}
 .acct .nm b{display:block;font-size:13.5px;font-weight:600;}
 .acct .nm span{display:block;font-size:11.5px;color:var(--muted);}
-.acct select{position:absolute;opacity:0;pointer-events:none;}
-.railsel{width:100%;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:12px;
-  padding:7px 9px;font-family:var(--body);font-size:13px;}
 .conn{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:0 6px;}
 .sw{position:relative;width:34px;height:19px;background:var(--line);border-radius:99px;transition:.2s;flex-shrink:0;}
 .sw i{position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:var(--card);transition:.2s;box-shadow:var(--shadow-sm);}
@@ -393,9 +394,28 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
 .today .tstrip{padding:9px 13px;font-size:12px;color:var(--muted);}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
 
-/* ---- the shared-password door (deleted when SSO lands) ---- */
-.gatepage{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--paper);}
-.gatecard{width:100%;max-width:352px;background:var(--card);border:1px solid var(--line-soft);border-radius:18px;
+/* ---- the shared-password door (deleted when SSO lands) ----
+   Sprout's own background is a flat #F7F7F7, so the door paints itself that
+   same colour and lays him over it with object-fit:contain. The two grounds
+   match, so the video has no edge to see - which is why there is no scrim
+   here, and no cover-crop taking his head and feet off on a laptop.
+
+   The door also holds the light palette whatever the system theme says. The
+   master is a bright render on near-white and there is no honest way to put it
+   on a #121A14 page; a door that is always light beats a white flash at night.
+   Everything past this screen follows the theme as before. */
+.gatepage{position:relative;min-height:100vh;display:grid;place-items:center;padding:24px;
+  --card:#FFFFFF; --ink:#26302A; --muted:#657064; --line:#DDE2D6; --line-soft:#EAEEE3;
+  --forest:#1D5829; --forest-deep:#103C19; --forest-light:#31773F; --forest-tint:#EAF3EC;
+  --gold-bright:#E3A73B; --bad:#B91C1C; --bad-tint:#FBE9E9;
+  --shadow:0 1px 2px rgba(23,41,28,.05),0 12px 32px rgba(23,41,28,.09);
+  --shadow-sm:0 1px 2px rgba(23,41,28,.045),0 4px 14px rgba(23,41,28,.05);
+  color:var(--ink);}
+.sproutbg{position:absolute;inset:0;z-index:0;overflow:hidden;
+  background-repeat:no-repeat;background-size:contain;background-position:50% 50%;}
+.sproutbg video{display:block;width:100%;height:100%;object-fit:contain;object-position:50% 50%;}
+.gatecard{position:relative;z-index:1;width:100%;max-width:352px;background:var(--card);
+  border:1px solid var(--line-soft);border-radius:18px;
   box-shadow:var(--shadow);padding:26px 24px;display:flex;flex-direction:column;gap:11px;text-align:center;}
 .gatecard img{width:44px;height:44px;border-radius:13px;background:#fff;margin:0 auto 2px;}
 .gatecard h1{font-size:23px;}
@@ -406,6 +426,18 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
 .gatecard button{width:100%;padding:11px 14px;}
 .gatecard small{font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:5px;}
 .gerr{font-size:13px;color:var(--bad);background:var(--bad-tint);border-radius:12px;padding:8px 11px;}
+/* The second door: a name from a list, then a PIN. Same card, same palette. */
+.gatesel{width:100%;border:1px solid var(--line);background:var(--card);color:var(--ink);
+  border-radius:14px;padding:11px 14px;font:inherit;font-size:14.5px;}
+.gatesel:focus{outline:0;border-color:var(--forest-light);box-shadow:var(--shadow-sm);}
+.gateback{font-size:12.5px;color:var(--muted);text-decoration:none;margin-top:2px;}
+.gateback:hover{color:var(--forest);text-decoration:underline;}
+/* Wide enough for the card to stand beside him rather than on top of him. */
+@media (min-width:880px){
+  .gatepage{place-items:center start;padding-left:min(13vw,168px);}
+  .sproutbg{background-position:73% 50%;}
+  .sproutbg video{object-position:73% 50%;}
+}
 
 @media (max-width:880px){
   .app{grid-template-columns:1fr;}
@@ -414,7 +446,7 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
   .rail,.rail.mini{width:auto;}
   .rail.open,.rail.mini.open{width:270px;}
   .rail.mini .wordmark,.rail.mini .scroll,
-  .rail.mini .newbtn .lbl,.rail.mini .acct .nm,.rail.mini .railsel{display:revert;}
+  .rail.mini .newbtn .lbl,.rail.mini .acct .nm{display:revert;}
   .rail.mini .top{flex-direction:row;}
   .railtoggle{display:grid;place-items:center;width:32px;height:32px;border:1px solid var(--line-soft);border-radius:12px;}
   .col,.dockcol{max-width:100%;}
@@ -454,3 +486,75 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
 .palfoot{border-top:1px solid var(--line-soft);padding:8px 14px;font-size:11.5px;color:var(--muted);
   display:flex;gap:14px;}
 @media (max-width:880px){.pal{padding:6vh 12px 12px;}}
+
+/* ================= administration =================
+   Deliberately not calm. The teacher's screen is one idea per box with empty
+   space doing work (Addendum D5.2); this one is a dense table read by somebody
+   looking for an outlier, and hiding rows from them would be the failure. Same
+   tokens, opposite density. */
+.admin{min-height:100vh;background:var(--paper);}
+.ahead{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:22px;flex-wrap:wrap;
+  padding:12px 26px;background:var(--card);border-bottom:1px solid var(--line);}
+.abrand{display:flex;align-items:center;gap:10px;}
+.abrand img{width:26px;height:26px;border-radius:8px;background:#fff;}
+.abrand b{display:block;font-family:var(--display);font-size:15px;font-weight:750;letter-spacing:-.015em;}
+.abrand span{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;}
+.atabs{display:flex;gap:3px;flex-wrap:wrap;}
+.atabs a{padding:6px 11px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--muted);
+  text-decoration:none;transition:.12s;}
+.atabs a:hover{background:var(--forest-tint);color:var(--forest);}
+.atabs .aback{margin-left:10px;color:var(--forest);}
+.awho{margin-left:auto;font-size:12.5px;color:var(--muted);}
+.abody{padding:26px;max-width:1180px;}
+.abody h1{font-size:25px;margin-bottom:14px;}
+.abody h2{font-size:15px;margin:30px 0 9px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);font-weight:700;}
+.awide{max-width:70ch;}
+.anote{font-size:12.5px;color:var(--muted);line-height:1.55;display:block;}
+.anote b{color:var(--ink);}
+.abody .bad{color:var(--bad);}
+.anotice{max-width:60ch;background:var(--warn-tint);border:1px solid var(--gold-bright);
+  border-radius:16px;padding:20px 22px;}
+.anotice h1{font-size:18px;margin-bottom:8px;}
+.anotice code{font-size:12.5px;background:var(--card);padding:1px 5px;border-radius:6px;}
+
+.acards{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;margin-bottom:16px;}
+.acard{background:var(--card);border:1px solid var(--line-soft);border-radius:15px;padding:14px 16px;
+  box-shadow:var(--shadow-sm);}
+.alabel{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;}
+.acard b{display:block;font-size:27px;font-weight:800;letter-spacing:-.02em;margin:3px 0 1px;}
+
+.atable{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--card);
+  border:1px solid var(--line-soft);border-radius:14px;overflow:hidden;}
+.atable th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+  font-weight:700;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--sunk);}
+.atable td{padding:9px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top;}
+.atable tr:last-child td{border-bottom:0;}
+.atable tr.off{opacity:.5;}
+.atable .r{text-align:right;}
+/* Errors and user agents are long and must not be truncated on the one screen
+   that exists to show them. */
+.atable .wrap{max-width:44ch;white-space:pre-wrap;word-break:break-word;}
+.atable code{font-size:12px;color:var(--muted);}
+.atable a{color:var(--forest);text-decoration:none;}
+.atable a:hover{text-decoration:underline;}
+.atable .anote{margin-top:1px;}
+.atable .pill{margin-top:3px;margin-right:4px;}
+/* A bar in the cell rather than a chart beside it: the number is what is read,
+   and the bar only has to answer "which of these is the big one". */
+.bar{display:block;height:3px;border-radius:2px;background:var(--line-soft);margin-top:5px;max-width:230px;}
+.bar i{display:block;height:100%;border-radius:2px;background:var(--forest-light);}
+
+.arow{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px;}
+.achips{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;}
+.achips a{padding:4px 10px;border-radius:99px;border:1px solid var(--line-soft);background:var(--card);
+  font-size:12.5px;color:var(--muted);text-decoration:none;transition:.12s;}
+.achips a:hover{border-color:var(--forest-light);color:var(--forest);}
+.achips a.on{background:var(--forest);border-color:var(--forest);color:#FFFDF8;}
+
+@media (max-width:880px){
+  .abody{padding:16px;}
+  .awho{display:none;}
+  /* Wide tables scroll inside themselves rather than pushing the page sideways. */
+  .atable{display:block;overflow-x:auto;white-space:nowrap;}
+  .atable .wrap{white-space:pre-wrap;}
+}

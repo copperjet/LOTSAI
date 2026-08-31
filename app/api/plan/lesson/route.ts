@@ -31,7 +31,7 @@ export async function PATCH(req: NextRequest) {
   if (!EDITABLE.includes(field as Field)) {
     return NextResponse.json({
       error: 'field',
-      message: 'Only methodology, resources and differentiation are editable. Objectives come from the registry.',
+      message: 'Only the teaching, resources and differentiation can be changed here. Objectives come from the curriculum.',
     }, { status: 400 });
   }
 

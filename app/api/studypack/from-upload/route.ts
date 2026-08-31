@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   if (!resolvedRefs.length) {
     return NextResponse.json({
       error: 'nothing_resolved',
-      message: `None of the objective codes in ${upload.filename} resolve against the ${upload.year_group} ${upload.subject_id} registry, so there is nothing to build a pack from.`,
+      message: `None of the objectives in ${upload.filename} are in the ${upload.year_group} ${upload.subject_id} curriculum, so there is nothing to build a pack from.`,
       unresolved,
     }, { status: 409 });
   }
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
     // The refs were resolved when uploaded, but the registry no longer holds them.
     return NextResponse.json({
       error: 'stale_refs',
-      message: 'The objectives this file matched are no longer in the registry. Re-upload it so it can be reconciled again.',
+      message: 'The curriculum has changed since this file was read. Send it again so it can be checked afresh.',
     }, { status: 409 });
   }
 
@@ -102,6 +102,5 @@ export async function POST(req: NextRequest) {
     glossary: content.glossary.length,
     fromUpload: { filename: upload.filename, resolved: resolvedRefs.length, unresolved },
     render,
-    usage: out.usage,
   });
 }

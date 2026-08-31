@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CREST } from '@/lib/crest';
 import { MARK } from '@/lib/mark';
+import { friendly } from '@/lib/friendly';
+import Ambience from './Ambience';
 
 /**
  * The chat shell (Addendum D section D5.1).
@@ -42,7 +44,11 @@ interface ClassWeek {
   status: string | null; signedOff: boolean; topic: string | null;
 }
 interface ClassCal { id: string; name: string; subject_id: string; year_group: string; weeks: ClassWeek[] }
-interface Person { email: string; full_name: string; role: string }
+/** app_user.role is a database value. The rail is not the place to print one. */
+const ROLE_SAYS: Record<string, string> = {
+  teacher: 'Teacher', hod: 'Head of Department', coordinator: 'Coordinator',
+  principal: 'Principal', admin: 'Administrator',
+};
 
 interface Hit { id: string; label: string; note: string; kind: string; payload: Record<string, unknown> }
 interface SearchHits { planners: Hit[]; weeks: Hit[]; bank: Hit[] }
@@ -130,11 +136,8 @@ export default function App() {
   const [today, setToday] = useState<TodayTask[]>([]);
   const [todayDate, setTodayDate] = useState('');
   const [user, setUser] = useState<{ name: string; role: string } | null>(null);
-  const [people, setPeople] = useState<Person[]>([]);
-  const [me, setMe] = useState('');
   const [mini, setMini] = useState(false);
   const [palette, setPalette] = useState(false);
-  const [spend, setSpend] = useState(0);
   const [busy, setBusyPhases] = useState<string[] | null>(null);
   const saying = useBusyPhases(busy);
   /** One line, for the short waits that never get as far as a second phase. */
@@ -150,8 +153,6 @@ export default function App() {
   const say = (node: React.ReactNode) => setTurns(t => [...t, { who: 'ai', node }]);
   const said = (text: string) => setTurns(t => [...t, { who: 'user', text }]);
 
-  const meter = (usage?: { cost: number } | null) => { if (usage) setSpend(s => s + usage.cost); };
-
   const loadAgenda = useCallback(async () => {
     const r = await fetch('/api/agenda').then(r => r.json());
     setAgenda(r.items); setUser(r.user);
@@ -161,9 +162,6 @@ export default function App() {
 
   useEffect(() => { loadAgenda().then(items => setTurns([{ who: 'ai', node: opening(items) }])); }, [loadAgenda]);
   useEffect(() => {
-    fetch('/api/whoami').then(r => r.json())
-      .then(r => { setPeople(r.people ?? []); setMe(r.current ?? ''); })
-      .catch(() => {});
     try { setMini(localStorage.getItem('lots_rail') === 'mini'); } catch { /* private mode */ }
   }, []);
 
@@ -258,7 +256,6 @@ export default function App() {
     said(text);
     const q = text.toLowerCase();
     const plan = agenda.find(i => i.intent === 'plan');
-    if (/cost|spend|price|budget/.test(q)) return doSpend();
     // Asked before the planner check: "what is next on the calendar" is a
     // question about the term, not a request to start next week's planner.
     if (/calendar|term dates|which week|what week|when is week|what.{0,3}s next|whats next/.test(q)) return doCalendar();
@@ -298,7 +295,6 @@ export default function App() {
         I could not answer that just now. Try again in a moment.
       </p></div>);
     }
-    meter(r.usage);
     if (r.kind === 'open_ended' || !r.answer) return boundary();
     if (r.kind === 'general') {
       return say(<div className="c pad">
@@ -322,7 +318,7 @@ export default function App() {
     setBusy('Getting it up for you.');
     const r = await fetch(`/api/plan/open?plannerId=${plannerId}`).then(r => r.json());
     setBusy(null);
-    if (r.error) return say(<div className="bound"><p>{r.error}</p></div>);
+    if (r.error) return say(<div className="bound"><p>{r.message ?? friendly(r.error)}</p></div>);
     say(<PlannerCard r={r} mode={r.mode} onSubmit={() => doSubmit(r.plannerId)}
                      openFolds={openFolds} setOpenFolds={setOpenFolds} />);
   }
@@ -372,7 +368,7 @@ export default function App() {
               {cal.classes.map(k => {
                 const wk = k.weeks.find(x => x.weekNumber === w.week_number);
                 const label = wk?.status ? `${k.name} - ${SAYS[wk.status] ?? wk.status}`
-                            : !wk?.signedOff ? `${k.name} - registry not signed off`
+                            : !wk?.signedOff ? `${k.name} - not signed off yet`
                             : `Plan ${k.name}`;
                 return (
                   <button key={k.id} className="btn" disabled={!wk?.signedOff}
@@ -435,7 +431,7 @@ export default function App() {
     if (r.registry.uncoded) {
       return say(<>
         <p className="said">
-          Week {p.weekNumber} is in the registry, but this overview states its objectives in prose with
+          Week {p.weekNumber} is in the curriculum, but this overview gives its objectives in prose with
           no syllabus references. I will not invent codes, so I cannot match it against anyone else&rsquo;s
           work - I can still write the plan.
         </p>
@@ -454,7 +450,7 @@ export default function App() {
         </p>
         <div className="acts">
           <button className="btn primary" onClick={() => doGenerate(p, 'create')}>Write it</button>
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about ${r.costs.create.toFixed(3)}</span>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about a minute</span>
         </div>
       </>);
     }
@@ -476,11 +472,11 @@ export default function App() {
         <div className="acts" style={{ marginTop: 15 }}>
           <button className="btn primary" onClick={() => doGenerate(p, 'adapt', a.id)}>Adapt it for this class</button>
           <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-            about ${r.costs.adapt.toFixed(3)} - it only writes the difference
+            quicker - it only changes what differs
           </span>
         </div>
         <div className="acts" style={{ marginTop: 10 }}>
-          <button className="quiet" onClick={() => doGenerate(p, 'reuse', a.id)}>Use it unchanged, free</button>
+          <button className="quiet" onClick={() => doGenerate(p, 'reuse', a.id)}>Use it unchanged</button>
           <button className="quiet" onClick={() => doGenerate(p, 'create')}>Start fresh instead</button>
         </div>
       </div>
@@ -494,8 +490,7 @@ export default function App() {
       body: JSON.stringify({ ...p, mode, basisArtifactId }),
     }).then(r => r.json());
     setBusy(null);
-    if (r.error) return say(<div className="bound"><p>{r.error}</p></div>);
-    meter(r.usage);
+    if (r.error) return say(<div className="bound"><p>{r.message ?? friendly(r.error)}</p></div>);
     say(<PlannerCard r={r} mode={mode} onSubmit={() => doSubmit(r.plannerId)}
                      openFolds={openFolds} setOpenFolds={setOpenFolds} />);
   }
@@ -505,7 +500,7 @@ export default function App() {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ plannerId }),
     }).then(r => r.json());
     if (r.error) { say(<div className="bound"><p>{r.message}</p></div>); return false; }
-    say(<p className="said">Submitted. Your HOD sees it with the gate results attached, so the review starts where it is weak.</p>);
+    say(<p className="said">Submitted. Your HOD sees the checks alongside it, so the review starts where it is weak.</p>);
     loadAgenda();
     return true;
   }
@@ -558,7 +553,7 @@ export default function App() {
         </div>
         <div className="acts" style={{ marginTop: 12 }}>
           <button className="btn primary" onClick={() => doPackGenerate(p)}>Build it</button>
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about ${r.costs.create.toFixed(3)}</span>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about a minute</span>
         </div>
       </>);
     }
@@ -577,7 +572,7 @@ export default function App() {
         </div>
         <div className="acts" style={{ marginTop: 15 }}>
           <button className="btn primary" onClick={() => openPack(best.id, true)}>Open it, unchanged</button>
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>free - no AI call</span>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>ready now</span>
         </div>
         <div className="acts" style={{ marginTop: 10 }}>
           <button className="quiet" onClick={() => doPackGenerate(p)}>Build a new one instead</button>
@@ -592,8 +587,7 @@ export default function App() {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(p),
     }).then(r => r.json());
     setBusy(null);
-    if (r.error) return say(<div className="bound"><p>{r.error}</p></div>);
-    meter(r.usage);
+    if (r.error) return say(<div className="bound"><p>{r.message ?? friendly(r.error)}</p></div>);
     say(<PackCard r={r as PackResult} onOpen={() => openPack(r.studyPackId)}
                   onPdf={() => openPackPdf(r.studyPackId)}
                   onApprove={() => doApprovePack(r.studyPackId)} />);
@@ -608,7 +602,7 @@ export default function App() {
     setBusy(null);
     if (r.url) { window.open(r.url, '_blank'); return; }
     say(<div className="bound"><p style={{ fontSize: 14 }}>
-      The pack is saved, but its interactive HTML has not rendered yet. Try again in a moment.
+      The pack is saved. It is not quite ready to open - try again in a moment.
     </p></div>);
   }
 
@@ -622,7 +616,7 @@ export default function App() {
     setBusy(null);
     if (r.url) { window.open(r.url, '_blank'); return; }
     say(<div className="bound"><p style={{ fontSize: 14 }}>
-      The printable PDF could not be rendered. {r.error ? `(${r.error})` : ''} Try again in a moment.
+      {friendly('render_failed')}
     </p></div>);
   }
 
@@ -635,7 +629,7 @@ export default function App() {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ studyPackId }),
     }).then(r => r.json());
     setBusy(null);
-    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message ?? r.error}</p></div>);
+    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message ?? friendly(r.error)}</p></div>);
     const d = r.drive ?? {};
     say(<>
       <p className="said">
@@ -656,7 +650,7 @@ export default function App() {
    *  registry first — only the objectives the school's curriculum holds seed a pack. */
   async function doPackFromUpload(initial?: File[]) {
     const cal = await loadCalendar();
-    if (!cal.classes.length) return say(<p className="said">You have no classes to reconcile a file against.</p>);
+    if (!cal.classes.length) return say(<p className="said">You have no classes to check a file against.</p>);
     say(<UploadCard classes={cal.classes} onBuild={doBuildFromUpload} initial={initial} />);
   }
 
@@ -679,8 +673,7 @@ export default function App() {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ uploadId }),
     }).then(r => r.json());
     setBusy(null);
-    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message ?? r.error}</p></div>);
-    meter(r.usage);
+    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message ?? friendly(r.error)}</p></div>);
     say(<PackCard r={r as PackResult} onOpen={() => openPack(r.studyPackId)}
                   onPdf={() => openPackPdf(r.studyPackId)}
                   onApprove={() => doApprovePack(r.studyPackId)} />);
@@ -719,7 +712,7 @@ export default function App() {
         </div>
         <div className="acts" style={{ marginTop: 12 }}>
           <button className="btn primary" onClick={() => doWorksheetGenerate(classId, weekNumber)}>Build it</button>
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about ${r.costs.create.toFixed(3)}</span>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about a minute</span>
         </div>
       </>);
     }
@@ -738,7 +731,7 @@ export default function App() {
         </div>
         <div className="acts" style={{ marginTop: 15 }}>
           <button className="btn primary" onClick={() => openWorksheet(best.id, true)}>Open it, unchanged</button>
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>free - no AI call</span>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>ready now</span>
         </div>
         <div className="acts" style={{ marginTop: 10 }}>
           <button className="quiet" onClick={() => doWorksheetGenerate(classId, weekNumber)}>Build a new one instead</button>
@@ -754,8 +747,7 @@ export default function App() {
     }).then(r => r.json());
     setBusy(null);
     if (r.blocked) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message}</p></div>);
-    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.error}</p></div>);
-    meter(r.usage);
+    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message ?? friendly(r.error)}</p></div>);
     say(<WorksheetCard r={r as WorksheetResult}
                        onOpen={() => openWorksheet(r.worksheetId)}
                        onApprove={() => doApproveWorksheet(r.worksheetId)} />);
@@ -770,7 +762,7 @@ export default function App() {
     setBusy(null);
     if (r.url) { window.open(r.url, '_blank'); return; }
     say(<div className="bound"><p style={{ fontSize: 14 }}>
-      The worksheet is saved, but its PDF has not rendered yet. Try again in a moment.
+      The worksheet is saved. Its printable version is not quite ready - try again in a moment.
     </p></div>);
   }
 
@@ -783,7 +775,7 @@ export default function App() {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ worksheetId }),
     }).then(r => r.json());
     setBusy(null);
-    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message ?? r.error}</p></div>);
+    if (r.error) return say(<div className="bound"><p style={{ fontSize: 14 }}>{r.message ?? friendly(r.error)}</p></div>);
     const d = r.drive ?? {};
     say(<>
       <p className="said">
@@ -846,7 +838,6 @@ export default function App() {
       body: JSON.stringify({ lessonEntryId, raw }),
     }).then(r => r.json());
     setBusy(null);
-    meter(r.usage);
 
     say(<>
       <p className="said">Recorded, and written into the Teacher&rsquo;s Comments box in the right register.</p>
@@ -908,7 +899,7 @@ export default function App() {
         <p className="said">Approved, and added to the bank where the rest of the year group can find it.</p>
         <div className="acts">
           <button className="btn" onClick={() => openPlannerPdf(plannerId)}>Open the PDF</button>
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>rendered on the school template</span>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>on the school&rsquo;s own template</span>
         </div>
       </>);
     } else {
@@ -925,7 +916,7 @@ export default function App() {
     setBusy(null);
     if (r.url) { window.open(r.url, '_blank'); return; }
     say(<div className="bound"><p style={{ fontSize: 14 }}>
-      The PDF has not rendered yet. It renders on approval - try again in a moment.
+      The printable version is not ready yet. It is made when the plan is approved.
     </p></div>);
   }
 
@@ -953,7 +944,6 @@ export default function App() {
           </div>
           <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
             {b.weeks} weeks imported, {b.uncoded} of them with no syllabus references.
-            {b.source && <> Source: <code>{b.source}</code></>}
           </p>
         </div>
       ))}
@@ -969,7 +959,7 @@ export default function App() {
                 {g.year_group} {g.subject} {g.semester ? `· S${g.semester}` : ''}
               </summary>
               <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, color: 'var(--muted)' }}>
-                {g.files.map(f => <li key={f}><code>{f}</code></li>)}
+                {g.files.map(f => <li key={f}>{f}</li>)}
               </ul>
             </details>
           ))}
@@ -979,7 +969,7 @@ export default function App() {
       {(unreadable.length > 0 || unplaced.length > 0) && (
         <details className="c pad">
           <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
-            {unreadable.length} unreadable · {unplaced.length} unplaced file{unplaced.length === 1 ? '' : 's'}
+            {unreadable.length} could not be read · {unplaced.length} not yet placed
           </summary>
         </details>
       )}
@@ -1013,10 +1003,6 @@ export default function App() {
     </>);
   }
 
-  function doSpend() {
-    say(<p className="said">Every call is metered - workflow, model, tokens, cached tokens, cost. This session so far: <b>${spend.toFixed(4)}</b>.</p>);
-  }
-
   function boundary() {
     say(
       <div className="bound">
@@ -1041,7 +1027,7 @@ export default function App() {
   const chips = (() => {
     const lead = agenda[0];
     const pool = user?.role === 'hod'
-      ? ['Show me what needs reviewing', 'Registry conflicts', 'Coverage']
+      ? ['Show me what needs reviewing', 'Curriculum sign-off', 'Coverage']
       : ['Plan next week', 'Make a worksheet', 'Make a study pack', 'How did today go?'];
     const first = lead?.act ?? pool[0];
     const max = user?.role === 'hod' ? 3 : 4;
@@ -1050,13 +1036,14 @@ export default function App() {
 
   return (
     <div className="app">
+      <Ambience />
       <nav className={`rail ${mini ? 'mini' : ''}`}>
         <div className="top">
           <img src={CREST} alt="Lusaka Oaktree School" />
           <div className="wordmark"><b>LOTS AI</b></div>
           <div className="tacts">
             <button className="railtog" onClick={() => setPalette(true)} title="Search (Ctrl+K)"
-                    aria-label="Search planners, registry weeks and the shared bank">⌕</button>
+                    aria-label="Search planners, curriculum weeks and the shared bank">⌕</button>
             <button className="railtog" onClick={toggleRail} aria-expanded={!mini}
                     title={`${mini ? 'Expand' : 'Collapse'} the sidebar (Ctrl+B)`}>
               {mini ? '»' : '«'}
@@ -1078,27 +1065,12 @@ export default function App() {
             <span className={`sw ${online ? 'on' : ''}`}><i /></span>
             <span>{online ? 'Online' : 'Offline - capture still works'}</span>
           </div>
-          {user && <div className="acct"><span className="av">{user.name.split(' ').map(s => s[0]).join('')}</span>
-            <span className="nm"><b>{user.name}</b><span>{user.role}</span></span></div>}
-          {people.length > 1 && <>
-            <label className="sr" htmlFor="whoami">Signed in as</label>
-            <select id="whoami" className="railsel" value={me}
-                    onChange={async e => {
-                      const email = e.target.value;
-                      setMe(email);
-                      await fetch('/api/whoami', {
-                        method: 'POST', headers: { 'content-type': 'application/json' },
-                        body: JSON.stringify({ email }),
-                      });
-                      // Everything on screen belongs to the person who just left.
-                      const items = await loadAgenda();
-                      setTurns([{ who: 'ai', node: opening(items) }]);
-                    }}>
-              {people.map(p => (
-                <option key={p.email} value={p.email}>{p.full_name} - {p.role}</option>
-              ))}
-            </select>
-          </>}
+          {user && <div className="acct">
+            <span className="av">{user.name.split(' ').map(s => s[0]).join('')}</span>
+            <span className="nm"><b>{user.name}</b><span>{ROLE_SAYS[user.role] ?? user.role}</span></span>
+            <form method="post" action="/api/signout"><button className="signout" type="submit"
+              title="Sign out">Sign out</button></form>
+          </div>}
         </div>
       </nav>
 
@@ -1111,9 +1083,6 @@ export default function App() {
       <div className="main">
         <div className="mtop">
           <h2>Semester 1 <span className="sub2">· 2026/27</span></h2>
-          <button className="meter" onClick={doSpend}>
-            <span className="dot" />AI spend <b className="num">${spend.toFixed(4)}</b>
-          </button>
         </div>
 
         <TodayBox tasks={today} date={todayDate} onPick={runTask} />
@@ -1219,7 +1188,7 @@ function SearchPalette({ agenda, onClose, onPick, onAgenda }: {
   }, [q]);
 
   const groups: [string, string, Hit[]][] = hits
-    ? [['Your planners', '▤', hits.planners], ['Registry weeks', '▦', hits.weeks], ['Shared bank', '◈', hits.bank]]
+    ? [['Your planners', '▤', hits.planners], ['Curriculum weeks', '▦', hits.weeks], ['Shared bank', '◈', hits.bank]]
     : [];
   const flat = groups.flatMap(([, , g]) => g);
 
@@ -1316,7 +1285,7 @@ function PlanPicker({ classes, today, onPick }: {
                     onClick={() => onPick(k.id, w.weekNumber)}>
               <b>Week {w.weekNumber}</b>
               <small>w/c {WHEN(w.weekCommencing)}</small>
-              <small>{blocked ? 'Registry not signed off'
+              <small>{blocked ? 'Not signed off yet'
                     : w.status ? (SAYS[w.status] ?? w.status)
                     : w.topic ? w.topic.slice(0, 48) : 'Not started'}</small>
             </button>
@@ -1422,7 +1391,7 @@ function PackCard({ r, onOpen, onPdf, onApprove }: {
   return (
     <>
       <p className="said">
-        Built. <b>{r.title}</b> - objectives are copied from the registry, the key ideas, quizzes and
+        Built. <b>{r.title}</b> - objectives are copied from the curriculum, the key ideas, quizzes and
         glossary are written for the age group.
       </p>
       <div className="c pad">
@@ -1500,7 +1469,7 @@ function WorksheetCard({ r, onOpen, onApprove }: {
     <>
       <p className="said">
         Built. <b>{r.title}</b> - {r.tasks} task{r.tasks === 1 ? '' : 's'}, each in three tiers
-        (support, core, extension) with an answer key. Objectives are copied from the registry.
+        (support, core, extension) with an answer key. Objectives are copied from the curriculum.
       </p>
       <div className="c pad">
         <div className="row" style={{ gap: 5 }}>
@@ -1573,7 +1542,7 @@ function UploadCard({ classes, onBuild, initial }: {
         {files.length
           ? <>Which subject {files.length === 1 ? 'is this' : 'are these'} for?</>
           : <>Which subject is this for?</>}
-        {' '}I match every objective code in it against that subject&rsquo;s registry, and build only
+        {' '}I check every objective code in it against that subject&rsquo;s curriculum, and build only
         from the ones the curriculum holds.
       </p>
       <div className="row" style={{ marginTop: 10, gap: 7 }}>
@@ -1605,7 +1574,7 @@ function UploadCard({ classes, onBuild, initial }: {
                 <figcaption>{t.name}</figcaption>
                 {state === 'reading' && <span className="shotwait" aria-hidden />}
                 {state === 'done' && result?.files?.[i] && (
-                  <figcaption className="read">{result.files[i].textLength} characters read</figcaption>
+                  <figcaption className="read">Read</figcaption>
                 )}
               </figure>
             ))}
@@ -1615,11 +1584,11 @@ function UploadCard({ classes, onBuild, initial }: {
         <div className="acts" style={{ marginTop: 10 }}>
           <button className="btn" disabled={!files.length || state === 'reading'} onClick={reconcile}>
             {state === 'reading'
-              ? (files.some(f => f.type.startsWith('image/')) ? 'Reading the pages…' : 'Reading and reconciling…')
-              : 'Reconcile against the registry'}
+              ? (files.some(f => f.type.startsWith('image/')) ? 'Reading the pages…' : 'Reading and checking…')
+              : 'Check against the curriculum'}
           </button>
           {files.some(f => f.type.startsWith('image/')) && (
-            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about $0.01 a page</span>
+            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>photographs take a little longer</span>
           )}
         </div>
         {state === 'error' && <small className="cerr" style={{ display: 'block', marginTop: 8 }}>{err}</small>}
@@ -1638,7 +1607,7 @@ function UploadCard({ classes, onBuild, initial }: {
           )}
           {result.unresolved.length > 0 && (
             <>
-              <div className="eyebrow" style={{ margin: '11px 0 5px' }}>Not in the registry - never used</div>
+              <div className="eyebrow" style={{ margin: '11px 0 5px' }}>Not in the curriculum - never used</div>
               <div className="row" style={{ gap: 5 }}>
                 {result.unresolved.map(ref => <span key={ref} className="pill warn">{ref}</span>)}
               </div>
@@ -1847,7 +1816,7 @@ function PlannerCard({ r, mode, onSubmit, openFolds, setOpenFolds }: {
     <>
       <p className="said">
         {mode === 'adapt' ? <>Adapted. The rest is exactly the plan your HOD already approved.</>
-         : mode === 'reuse' ? <>Taken from the bank unchanged, and credited to its author. <b>No AI call.</b></>
+         : mode === 'reuse' ? <>Taken from the bank unchanged, and credited to whoever wrote it.</>
          : <>Draft ready. Objective text is copied from the overview, never written by me.</>}
       </p>
       <div className="tblwrap">
@@ -1885,7 +1854,7 @@ function PlannerCard({ r, mode, onSubmit, openFolds, setOpenFolds }: {
       </div>
 
       <Fold id="gate" open={openFolds} setOpen={setOpenFolds}
-            label={`Quality gate - ${gate.passed} passed${gate.warnings ? `, ${gate.warnings} to look at` : ''}${gate.blocking ? `, ${gate.blocking} blocking` : ''}`}>
+            label={`Checks - ${gate.passed} passed${gate.warnings ? `, ${gate.warnings} to look at` : ''}${gate.blocking ? `, ${gate.blocking} to fix first` : ''}`}>
         <ul className="gatelist">
           {gate.checks.map(c => (
             <li key={c.id} className={c.status === 'pass' ? 'p' : c.status === 'warn' ? 'w' : 'b'}>
@@ -1931,9 +1900,9 @@ function ReviewCard({ it, onDecide }: {
 
   return (
     <>
-      <p className="said"><b>{it.class_name}</b>, submitted by {it.teacher_name}. Compliance already passed - these are the ones worth your time.</p>
+      <p className="said"><b>{it.class_name}</b>, submitted by {it.teacher_name}. The routine checks already passed - these are the ones worth your time.</p>
       <div className="gate">
-        <header><h4>What the gate found</h4>
+        <header><h4>What the checks found</h4>
           <span className="pill ok">{it.gate?.passed ?? 0} passed</span>
           {!!it.gate?.warnings && <span className="pill warn">{it.gate.warnings} to look at</span>}
         </header>

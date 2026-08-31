@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   if (!reg) {
     return NextResponse.json({
       blocked: 'no_registry',
-      message: `The registry holds nothing for ${klass.year_group} ${klass.subject_id}, week ${weekNumber}. Import that overview before planning it.`,
+      message: `The curriculum has nothing for ${klass.year_group} ${klass.subject_id}, week ${weekNumber} yet. That overview needs adding before it can be planned.`,
     });
   }
 
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   if (!reg.signed_off_at) {
     return NextResponse.json({
       blocked: 'not_signed_off',
-      message: `${klass.year_group} ${klass.subject_id} has not been signed off by its HOD for this semester. Planning stays disabled until it is.`,
+      message: `${klass.year_group} ${klass.subject_id} is waiting for its Head of Department to sign off this semester. Planning opens as soon as they do.`,
     });
   }
 
@@ -101,6 +101,5 @@ export async function POST(req: NextRequest) {
     },
     matches,
     claimedBy: other,
-    costs: { reuse: 0, adapt: 0.008, create: 0.018 },
   });
 }

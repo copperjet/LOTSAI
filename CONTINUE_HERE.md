@@ -20,7 +20,9 @@ The **artefact engine** (Phase 1) is built and the **weekly planner** and **stud
 - **Upload → reconcile**: `POST /api/ingest/upload` extracts a .pdf/.docx and matches every
   objective code against the registry; unresolved codes are flagged, never accepted.
 
-Migrations applied through **0008**. Storage bucket `artefacts` exists (private).
+Migrations applied through **0010**. **0011 (sign-in) and 0012 (admin views) are written and not
+yet applied** — paste `supabase/migrations/APPLY_0011_0012.sql` into the SQL editor.
+Storage bucket `artefacts` exists (private).
 
 ## Environment / gotchas (READ FIRST)
 
@@ -29,8 +31,18 @@ Migrations applied through **0008**. Storage bucket `artefacts` exists (private)
   `.env.local` normally holds `MOCK_CLAUDE=1` (fixtures, free) — restore it when done.
 - **Migrations are manual**: no DB password locally, so DDL runs in the Supabase SQL editor. The
   seed and routes tolerate a missing table (degrade cleanly) so nothing breaks pre-migration.
-- **Site password** `OAKTR33@2026!`; POST it to `/api/gate` (form-encoded, with `next=/`) to get
-  the cookie, then `/api/whoami` to switch demo user (teacher `teacher.a@…`, HOD `hod.primary@…`).
+- **Site password**: in `SITE_PASSWORD` in `.env.local`, and nowhere else. It used to be written
+  out in this file; it is a live production credential and should be rotated, since it has been
+  in the repository. POST it to `/api/gate` (form-encoded, `next=/`) for the gate cookie.
+- **Sign-in**: past the gate there is now a personal PIN per member of staff (`/signin`). The
+  demo user switcher is gone — `POST /api/whoami` let anyone become anyone, which is why nothing
+  in `ai_usage` or `audit_log` from before migration 0011 names a real person. Locally,
+  `DEMO_USER_EMAIL` still stands in for a session so `npm run dev` and the seed keep working;
+  in production it does nothing.
+- **/admin** is the technical dashboard — spend, models, cache-hit ratio, latency, every user,
+  failed renders. Gated to `role in (admin, principal)` in `app/admin/layout.tsx`, answering
+  `notFound()` to everyone else. Nothing in the teacher UI links to it. `npm run seed` now
+  creates `admin@lusakaoaktree.school`; its PIN is chosen at first sign-in.
 - **pdfjs/mammoth**: `serverExternalPackages` in next.config.mjs — do not bundle them.
 - Supabase signed URLs force download disposition, so to *view* an HTML artefact in the browser
   pane, copy it into `public/` and open via localhost (delete after).
