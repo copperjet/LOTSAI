@@ -89,7 +89,6 @@ code{font-family:ui-monospace,'Cascadia Mono',Menlo,monospace;}
 .rail.mini .acct{justify-content:center;padding:6px 0;}
 .rail .top img{width:26px;height:26px;border-radius:8px;background:#fff;display:block;}
 .rail .top b{font-family:var(--display);font-size:16px;font-weight:750;letter-spacing:-.015em;}
-.rail .top small{display:block;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:-3px;}
 .newbtn{margin:4px 12px 12px;display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:13px;
   border:1px solid var(--line-soft);background:var(--card);font-size:14px;font-weight:600;transition:.15s;}
 .newbtn:hover{border-color:var(--forest-light);background:var(--forest-tint);}

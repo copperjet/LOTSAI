@@ -1017,7 +1017,7 @@ export default function App() {
       <nav className={`rail ${mini ? 'mini' : ''}`}>
         <div className="top">
           <img src={CREST} alt="Lusaka Oaktree School" />
-          <div className="wordmark"><b>LOTS AI</b><small>Lusaka Oaktree</small></div>
+          <div className="wordmark"><b>LOTS AI</b></div>
           <div className="tacts">
             <button className="railtog" onClick={() => setPalette(true)} title="Search (Ctrl+K)"
                     aria-label="Search planners, registry weeks and the shared bank">⌕</button>
