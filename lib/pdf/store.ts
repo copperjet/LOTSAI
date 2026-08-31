@@ -63,6 +63,21 @@ export async function storeArtefact(std: Standard, docId: string): Promise<Store
   }
 }
 
+/**
+ * Read a stored artefact back out of the bucket.
+ *
+ * Approval delivers a copy to Google Drive, and it reads that copy from here
+ * rather than from the renderer's return value on purpose: the bytes in Drive
+ * and the bytes behind "Open the PDF" are then provably the same object, which
+ * is exactly what was not true while approval rendered its own copy and threw
+ * it away.
+ */
+export async function readArtefact(path: string): Promise<Uint8Array | null> {
+  const { data, error } = await admin().storage.from(BUCKET).download(path);
+  if (error || !data) return null;
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 /** Insert a running job, or reopen the existing active one (partial unique index). */
 async function claimJob(db: ReturnType<typeof admin>, docType: string, docId: string): Promise<string | null> {
   const started = new Date().toISOString();

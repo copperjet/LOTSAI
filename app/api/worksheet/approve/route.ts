@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
 import * as engine from '@/lib/engine';
+import { storeArtefact, readArtefact } from '@/lib/pdf/store';
 import { uploadToDrive, driveMocked } from '@/lib/drive';
 
 export const runtime = 'nodejs';
@@ -40,15 +41,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Only the worksheet’s author can approve it' }, { status: 403 });
   }
 
-  // Render the printable PDF via the worksheet Standard's own renderer.
+  // Render the printable PDF via the worksheet Standard's own renderer, and store
+  // it. This used to render its own copy, send it to Drive and discard it, so the
+  // bucket kept whatever had been rendered at creation and "Open the worksheet
+  // PDF" could serve an older document than the one the school received. Going
+  // through storeArtefact keeps pdf_jobs as the single record of what was drawn,
+  // and reading the bytes back out is what makes the two copies provably equal.
   const { standard } = await engine.resolveWorkflow('worksheet');
-  let bytes: Uint8Array | null;
-  try {
-    bytes = await engine.render(standard, worksheetId);
-  } catch (e) {
-    return NextResponse.json({ error: `Could not render the PDF: ${e instanceof Error ? e.message : e}` }, { status: 500 });
+
+  const stored = await storeArtefact(standard, worksheetId);
+  if (!stored.ok || !stored.path) {
+    return NextResponse.json({
+      error: 'render_failed',
+      message: `The worksheet PDF could not be rendered, so nothing was sent to Drive.${stored.error ? ` (${stored.error})` : ''}`,
+    }, { status: 500 });
   }
-  if (!bytes) return NextResponse.json({ error: 'No PDF renderer' }, { status: 500 });
+  const bytes = await readArtefact(stored.path);
+  if (!bytes) {
+    return NextResponse.json({
+      error: 'render_failed',
+      message: 'The worksheet PDF was rendered but could not be read back, so nothing was sent to Drive.',
+    }, { status: 500 });
+  }
 
   const folderId = await resolveFolder(db, ws.subject_id, ws.year_group);
   if (!folderId && !driveMocked()) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
 import * as engine from '@/lib/engine';
+import { storeArtefact, readArtefact } from '@/lib/pdf/store';
 import { uploadToDrive, driveMocked } from '@/lib/drive';
 
 export const runtime = 'nodejs';
@@ -51,16 +52,35 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, status: 'returned' });
   }
 
-  // Render the printable PDF (same renderer /api/studypack/pdf uses).
+  // Render the printable PDF (same renderer /api/studypack/pdf uses) and store it.
+  //
+  // Storing is the point: this used to render its own copy, send it to Drive and
+  // discard it, so the bucket kept whatever had been rendered at creation. Any
+  // change to a renderer or to the inlined crest between creation and approval
+  // left "Open the PDF" showing one document and Drive holding another. Going
+  // through storeArtefact keeps pdf_jobs as the single record of what was drawn,
+  // and reading the bytes back out is what makes the two copies provably equal.
+  //
+  // The pack's own storage_path is deliberately left alone: it names the
+  // interactive HTML, which is the pack's primary rendering, and the PDF lives
+  // beside it at the same id.
   const { standard } = await engine.resolveWorkflow('study_pack');
   const pdfStd = { ...standard, renderer_id: 'studypack-pdf' };
-  let bytes: Uint8Array | null;
-  try {
-    bytes = await engine.render(pdfStd, studyPackId);
-  } catch (e) {
-    return NextResponse.json({ error: `Could not render the PDF: ${e instanceof Error ? e.message : e}` }, { status: 500 });
+
+  const stored = await storeArtefact(pdfStd, studyPackId);
+  if (!stored.ok || !stored.path) {
+    return NextResponse.json({
+      error: 'render_failed',
+      message: `The printable PDF could not be rendered, so nothing was sent to Drive.${stored.error ? ` (${stored.error})` : ''}`,
+    }, { status: 500 });
   }
-  if (!bytes) return NextResponse.json({ error: 'No PDF renderer' }, { status: 500 });
+  const bytes = await readArtefact(stored.path);
+  if (!bytes) {
+    return NextResponse.json({
+      error: 'render_failed',
+      message: 'The printable PDF was rendered but could not be read back, so nothing was sent to Drive.',
+    }, { status: 500 });
+  }
 
   // Resolve the Drive folder for this subject/year. In mock, a placeholder is fine;
   // live, a missing folder is a real configuration error the teacher should see.
