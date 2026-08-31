@@ -4,6 +4,6 @@
   "regions": ["cpt1"],
   "functions": {
     "app/api/**/*.ts": { "maxDuration": 120 },
-    "app/api/studypack/**/*.ts": { "maxDuration": 300, "memory": 3009 }
+    "app/api/studypack/**/*.ts": { "maxDuration": 300 }
   }
 }
