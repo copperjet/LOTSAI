@@ -68,11 +68,14 @@ export default async function SignIn({ searchParams }: {
           <input type="hidden" name="who" value={chosen.id} />
           <input type="hidden" name="next" value={next ?? '/'} />
           <input type="password" name="pin" inputMode="numeric" autoComplete="off"
-                 pattern="[0-9]*" autoFocus required
+                 pattern="[0-9]{4,8}" autoFocus required
+                 title="Use numbers only (0-9), 4 to 8 digits. No letters or spaces."
                  placeholder={setting ? 'New PIN' : 'PIN'} aria-label={setting ? 'New PIN' : 'PIN'} />
           {setting && (
             <input type="password" name="again" inputMode="numeric" autoComplete="off"
-                   pattern="[0-9]*" required placeholder="Same PIN again" aria-label="Repeat your new PIN" />
+                   pattern="[0-9]{4,8}" required
+                   title="Use numbers only (0-9), 4 to 8 digits. No letters or spaces."
+                   placeholder="Same PIN again" aria-label="Repeat your new PIN" />
           )}
           <button className="btn primary" type="submit">{setting ? 'Set it and continue' : 'Continue'}</button>
           {message && <p className="gerr">{message}</p>}
