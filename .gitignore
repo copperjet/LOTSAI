@@ -9,3 +9,9 @@ tsconfig.tsbuildinfo
 
 .vercel
 .env*.local
+
+# dev builds under a second dist dir, and the scratch render checks
+.next-dev*
+.render-check/
+.print_check.mjs
+__pycache__/

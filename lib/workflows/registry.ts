@@ -15,9 +15,11 @@ import { generatePlan, type GenerateInput } from '@/lib/planner';
 import { runGate } from '@/lib/gate';
 import { buildGateInput } from '@/lib/gateContext';
 import { renderPlanner } from '@/lib/pdf/renderers/planner';
-import { generateStudyPack, gateStudyPack, type GeneratePackInput } from '@/lib/studypack';
 import { renderStudyPack } from '@/lib/studypack_render';
 import { renderStudyPackPdf } from '@/lib/pdf/renderers/studypack';
+import { renderStudyPackPrint } from '@/lib/pdf/renderers/studypack_print';
+import { generateStudyPackV2, type GeneratePackV2Input } from '@/lib/studypack/generate';
+import { gateStudyPackV2 } from '@/lib/studypack/gate';
 import { generateWorksheet, gateWorksheet, type GenerateWorksheetInput } from '@/lib/worksheet';
 import { renderWorksheet } from '@/lib/pdf/renderers/worksheet';
 
@@ -36,20 +38,24 @@ export type Renderer = (docId: string) => Promise<Uint8Array>;
 
 export const GENERATORS: Record<string, Generator> = {
   planner: (input, userId) => generatePlan(input as GenerateInput, userId),
-  studypack: (input, userId) => generateStudyPack(input as GeneratePackInput, userId),
+  studypack: (input, userId) => generateStudyPackV2(input as GeneratePackV2Input, userId),
   worksheet: (input, userId) => generateWorksheet(input as GenerateWorksheetInput, userId),
 };
 
 export const GATES: Record<string, GateFn> = {
   // The planner gate needs its input assembled from the DB first (lib/gateContext).
   planner: async (plannerId, userId) => runGate(await buildGateInput(plannerId), userId),
-  studypack: (studyPackId) => gateStudyPack(studyPackId),
+  // Dispatches on content_version, so a v1 pack still gets the v1 gate.
+  studypack: (studyPackId) => gateStudyPackV2(studyPackId),
   worksheet: (worksheetId) => gateWorksheet(worksheetId),
 };
 
 export const RENDERERS: Record<string, Renderer> = {
   planner: (plannerId) => renderPlanner(plannerId),
   studypack: (studyPackId) => renderStudyPack(studyPackId),
-  'studypack-pdf': (studyPackId) => renderStudyPackPdf(studyPackId),
+  // The pack's own HTML, printed by a headless browser. Falls back to the pdf-lib
+  // renderer below when no browser can be started.
+  'studypack-pdf': (studyPackId) => renderStudyPackPrint(studyPackId),
+  'studypack-pdf-basic': (studyPackId) => renderStudyPackPdf(studyPackId),
   worksheet: (worksheetId) => renderWorksheet(worksheetId),
 };

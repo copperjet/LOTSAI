@@ -5,7 +5,7 @@ import { storeArtefact, readArtefact } from '@/lib/pdf/store';
 import { uploadToDrive, driveMocked } from '@/lib/drive';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 300;   // approval prints the pack before delivering it
 
 /**
  * POST /api/studypack/approve  { studyPackId, decision? }

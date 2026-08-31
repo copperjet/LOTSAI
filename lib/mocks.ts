@@ -202,12 +202,174 @@ export function mockAsk(prompt: string) {
   };
 }
 
+
+/**
+ * A v2 study pack, in two passes like the real generator.
+ *
+ * Both fixtures are read off the same prompt the model would have received, so a
+ * mocked pack tags real objective indexes, composes the block types the outline
+ * asked for, and satisfies the real gate in lib/studypack/gate.ts. The outline is
+ * deliberately varied - a resources page, content pages, a revision page - because a
+ * fixture that only ever produced one page shape would never exercise the renderer.
+ */
+function packObjectiveIndexes(cached: string): { index: number; label: string }[] {
+  const out: { index: number; label: string }[] = [];
+  let label = 'Objectives';
+  for (const line of cached.split('\n')) {
+    const week = line.match(/^Week (\d+):\s*(.*)$/);
+    if (week) { label = week[2].trim() || `Week ${week[1]}`; continue; }
+    const idx = line.match(/^\s*\[(\d+)\]\s*(.*)$/);
+    if (idx) out.push({ index: +idx[1], label: label || idx[2].slice(0, 40) });
+  }
+  return out;
+}
+
+export function mockPackOutline(cached: string) {
+  const objectives = packObjectiveIndexes(cached);
+  // Three objectives to a page keeps the fixture's page count sane on a long span.
+  const groups: { index: number; label: string }[][] = [];
+  for (let i = 0; i < objectives.length; i += 3) groups.push(objectives.slice(i, i + 3));
+
+  const pages = [
+    {
+      id: 'front', eyebrow: 'BEFORE YOU START', title: 'Helpful resources',
+      objective_indexes: [] as number[], accent: 'forest',
+      block_types: ['resources', 'key_ideas'],
+    },
+    // Two pages per topic, as the real packs do: notes and a worked example, then
+    // the questions. One page carrying all five blocks overflows its sheet and prints
+    // a headless continuation page, so the fixture keeps to the same page budget the
+    // generator's prompt asks for (lib/studypack/generate.ts, HOW MUCH FITS ON A PAGE).
+    ...groups.flatMap((g, i) => [
+      {
+        id: `topic${i + 1}`,
+        eyebrow: `SECTION ${String.fromCharCode(65 + i)}`,
+        title: g[0]?.label ?? `Topic ${i + 1}`,
+        objective_indexes: g.map(o => o.index),
+        accent: ['purple', 'teal', 'blue', 'gold'][i % 4],
+        block_types: ['key_notes', 'worked_example'],
+      },
+      {
+        id: `topic${i + 1}-practice`,
+        eyebrow: `SECTION ${String.fromCharCode(65 + i)} - PRACTICE`,
+        title: `${g[0]?.label ?? `Topic ${i + 1}`}: your turn`,
+        objective_indexes: g.map(o => o.index),
+        accent: ['purple', 'teal', 'blue', 'gold'][i % 4],
+        block_types: ['practice', 'quiz', 'think'],
+      },
+    ]),
+    {
+      id: 'revision', eyebrow: 'REVISION', title: 'Glossary and reflection',
+      objective_indexes: [] as number[], accent: 'blue',
+      block_types: ['glossary', 'reflection', 'closing'],
+    },
+  ];
+  return { title: 'Revision Study Pack', subtitle: 'Fixture pack', layout: 'a4-landscape', pages };
+}
+
+/** One filled page per id named in the fill prompt, carrying the blocks it asked for. */
+export function mockPackFill(prompt: string) {
+  const pages: { id: string; blocks: unknown[] }[] = [];
+  for (const m of prompt.matchAll(/^(\S+): "(.*)"/gm)) {
+    const id = m[1], title = m[2];
+    const after = prompt.slice(m.index ?? 0);
+    const types = after.split('blocks, in this order:')[1]?.split('\n')[0] ?? '';
+    const want = types.split(',').map(t => t.trim()).filter(Boolean);
+    pages.push({ id, blocks: want.map(t => mockBlock(t, title)).filter(Boolean) });
+  }
+  return { pages };
+}
+
+function mockBlock(type: string, title: string): unknown {
+  switch (type) {
+    case 'resources':
+      return { type: 'resources', intro: 'Look through these before you start.', groups: [
+        { label: 'BACKGROUND', items: [{ name: 'Your class notes for this unit', why: 'The examples worked through in lessons.', url: null }] },
+        { label: 'PRACTICE', items: [{ name: 'The exercises in your textbook', why: 'More of the same questions, with answers at the back.', url: null }] },
+      ] };
+    case 'key_notes':
+      return { type: 'key_notes', columns: 2, cards: [
+        { heading: 'What it means', body: `${title} in one sentence, in plain words.` },
+        { heading: 'How to start', body: 'Read the question twice before writing anything down.' },
+        { heading: 'A common slip', body: 'Check the units before you give the answer.' },
+        { heading: 'Show your working', body: 'Write each step on its own line so a mistake is easy to find.' },
+      ] };
+    case 'key_ideas':
+      return { type: 'key_ideas', items: [
+        'Recap the key vocabulary before you begin.',
+        'Work one example with a partner before working alone.',
+        'Check your answer against the worked example.',
+      ] };
+    case 'worked_example':
+      return { type: 'worked_example', examples: [
+        { prompt: `A short question on ${title}.`, steps: ['Write down what you are given.', 'Apply the method.', 'Check the answer is sensible.'], answer: '7' },
+      ] };
+    case 'practice':
+      return { type: 'practice', intro: null, columns: 2, questions: [
+        { text: 'Explain the method in your own words.', marks: 2, answer_lines: 3 },
+        { text: 'Work through one example of your own.', marks: 4, answer_lines: 4 },
+        { text: 'Where would this go wrong, and why?', marks: 6, answer_lines: 5 },
+      ] };
+    case 'quiz':
+      return { type: 'quiz', questions: [
+        { q: 'What should you do before answering?', options: ['Start writing', 'Read the question twice', 'Copy a neighbour'], correct: 1, explain: 'Reading it twice is what catches the trick in the wording.' },
+      ] };
+    case 'glossary':
+      return { type: 'glossary', terms: [
+        { term: 'Method', definition: 'The steps you follow to reach an answer.' },
+        { term: 'Working', definition: 'The steps written down so they can be checked.' },
+      ] };
+    case 'checklist':
+      return { type: 'checklist', columns: [
+        { heading: 'I can', blurb: null, items: ['explain the method', 'work an example', 'spot a mistake'] },
+      ] };
+    case 'table':
+      return { type: 'table', headers: ['Term', 'Means'], rows: [
+        { cells: ['Method', 'The steps you follow'] }, { cells: ['Working', 'The steps written down'] },
+      ], note: null };
+    case 'chart':
+      return { type: 'chart', kind: 'bar', title: 'Marks gained by section', unit: 'marks',
+        series: [{ label: 'A', value: 12 }, { label: 'B', value: 18 }, { label: 'C', value: 24 }],
+        aside_heading: 'Useful phrases', aside_items: ['rose steadily', 'the sharpest rise'] };
+    case 'source_card':
+      return { type: 'source_card', sources: [
+        { label: 'Source A', text: 'A short extract to judge.', quick_check: 'Who wrote it, and what do they gain from it?' },
+      ] };
+    case 'two_column':
+      return { type: 'two_column', left: { heading: 'One view', body: 'The case for.' }, right: { heading: 'The other', body: 'The case against.' } };
+    case 'callout':
+      return { type: 'callout', tone: 'tip', heading: 'Tip', body: 'Show every step of your working.' };
+    case 'think':
+      return { type: 'think', question: `Why does ${title} matter outside the classroom?`, resource_name: null, resource_url: null };
+    case 'reflection':
+      return { type: 'reflection', prompt: 'What was hardest in this unit, and what will you do about it?', marks: 10,
+        self_check: ['I named one thing I found hard', 'I said what I will do next'] };
+    case 'contents':
+      return { type: 'contents', heading: 'Contents' };
+    case 'closing':
+      return { type: 'closing', heading: 'Well done', tips: ['Review your notes regularly.', 'Try every question without help first.'] };
+    default:
+      return null;
+  }
+}
+
+/** Outcome extraction from an uploaded document (lib/studypack/objectives.ts). */
+export function mockOutcomes(prompt: string) {
+  const body = prompt.split('Document:')[1] ?? prompt;
+  const lines = body.split('\n').map(l => l.trim())
+    .filter(l => /^[-*•\d.]*\s*[A-Z]/.test(l) && l.length > 15 && l.length < 160);
+  return { outcomes: lines.slice(0, 6) };
+}
+
 /** Routed on CallOpts.workflow. Anything unknown gets an empty object. */
 export function mockFor(workflow: string, cached: string, prompt: string): unknown {
   if (workflow === 'planner_create' || workflow === 'planner_adapt') return mockPlan(cached, prompt);
   if (workflow === 'lesson_evaluation') return mockEvaluation(prompt);
   if (workflow === 'quality_gate') return mockGate();
   if (workflow === 'studypack_create') return mockPack(cached);
+  if (workflow === 'studypack_outline') return mockPackOutline(cached);
+  if (workflow === 'studypack_fill') return mockPackFill(prompt);
+  if (workflow === 'studypack_outcomes') return mockOutcomes(prompt);
   if (workflow === 'worksheet_create') return mockWorksheet(cached);
   // Plain text, not JSON: the OCR call has no schema, so lib/llm.ts returns
   // whatever the fixture is verbatim.

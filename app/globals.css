@@ -362,6 +362,11 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
 .cbox textarea:focus{outline:0;border-color:var(--forest-light);box-shadow:var(--shadow-sm);}
 .cbox textarea:disabled{opacity:.6;}
 
+/* The pasted material, still editable before it becomes a pack. */
+.paste{width:100%;border:1px solid var(--line);background:var(--card);color:var(--ink);
+  border-radius:14px;padding:11px 13px;font:inherit;font-size:14px;line-height:1.5;resize:vertical;}
+.paste:focus{outline:0;border-color:var(--forest-light);box-shadow:var(--shadow-sm);}
+
 /* ---- today: the day, ticking itself off ---- */
 .today{position:absolute;top:56px;right:20px;width:264px;z-index:40;background:var(--card);
   border:1px solid var(--line-soft);border-radius:18px;box-shadow:var(--shadow);overflow:hidden;

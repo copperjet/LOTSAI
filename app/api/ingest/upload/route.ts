@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
 import { reconcile } from '@/lib/ingest/reconcile';
 import { extractTextFromImage, isImageType } from '@/lib/ingest/ocr';
+import { cleanText, sourceNote, MAX_STORED_TEXT } from '@/lib/ingest/source';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -84,7 +85,7 @@ export async function POST(req: NextRequest) {
 
   // One document, so one reconciliation: a code that appears on page three of a
   // photographed worksheet belongs to the same pack as one on page one.
-  const text = texts.join('\n\n');
+  const text = cleanText(texts.join('\n\n'));
   const result = await reconcile(text, subjectId, yearGroup);
 
   // `kind` is the shape of the upload as a whole. Mixed sets are rare and the
@@ -95,11 +96,26 @@ export async function POST(req: NextRequest) {
     ? parts[0].filename
     : `${parts[0].filename} and ${parts.length - 1} more`;
 
-  const { data: upload } = await db.from('source_upload').insert({
+  const { data: upload, error: insertError } = await db.from('source_upload').insert({
     uploader: user.id, filename, kind, subject_id: subjectId, year_group: yearGroup,
-    extracted: { text_length: text.length, refs_found: result.refsFound, files: parts },
+    // The text itself is kept, not just its length. A study pack built from an
+    // upload is written from the teacher's own material; before this it was
+    // rebuilt from registry objectives alone and the file's content was thrown
+    // away. Capped so a scanned book cannot fill a jsonb column.
+    extracted: { text_length: text.length, refs_found: result.refsFound, files: parts, text: text.slice(0, MAX_STORED_TEXT) },
     reconciled: { resolved: result.resolved.map(r => r.ref), unresolved: result.unresolved },
   }).select('id').single();
+
+  // This used to be discarded, so a failed insert answered 200 with uploadId: null -
+  // which reads as success, and then "turn this into a study pack" failed with nothing
+  // to explain it.
+  if (insertError || !upload) {
+    console.error(`[upload] could not store ${filename}: ${insertError?.message ?? 'no row returned'}`);
+    return NextResponse.json({
+      error: 'upload_not_stored',
+      message: `${filename} was read, but it could not be saved. Send it again.`,
+    }, { status: 500 });
+  }
 
   await audit(user.id, 'ingest.upload', 'source_upload', upload?.id,
     { files: parts.length, kind, refs: result.refsFound.length, unresolved: result.unresolved.length });
@@ -109,7 +125,11 @@ export async function POST(req: NextRequest) {
     filename, kind, files: parts, textLength: text.length,
     ...result,
     // Say plainly when something the file claims is not in the school's curriculum.
-    note: noteFor(result.unresolved.length, result.refsFound.length, parts.length, yearGroup, subjectId),
+    note: sourceNote({
+      from: parts.length === 1 ? 'this file' : `these ${parts.length} files`,
+      refsFound: result.refsFound.length, unresolved: result.unresolved.length,
+      subjectId, yearGroup,
+    }),
   });
 }
 
@@ -121,16 +141,6 @@ function kindOf(file: File): Kind | null {
   return null;
 }
 
-function noteFor(unresolved: number, found: number, fileCount: number, yearGroup: string, subjectId: string) {
-  const from = fileCount === 1 ? 'this file' : `these ${fileCount} files`;
-  if (!found) {
-    return `No objectives were found in ${from}. Nothing can be built from it until it names objectives the ${yearGroup} ${subjectId} curriculum holds.`;
-  }
-  if (unresolved) {
-    return `${unresolved} objective(s) in ${from} are not in the ${yearGroup} ${subjectId} curriculum. They will not be used until someone confirms them.`;
-  }
-  return `Every objective in ${from} is in the curriculum.`;
-}
 
 /** PDF text via pdfjs (legacy build runs in Node; no worker needed for text). */
 async function extractPdf(bytes: Uint8Array): Promise<string> {

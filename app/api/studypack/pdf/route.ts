@@ -5,7 +5,7 @@ import { storeArtefact } from '@/lib/pdf/store';
 import { viewUrl } from '@/lib/artefactUrl';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 300;   // a browser cold start plus the print
 
 /**
  * POST /api/studypack/pdf  { studyPackId }        — render the printable PDF, return its URL

@@ -1,0 +1,711 @@
+/**
+ * The study pack v2 generator.
+ *
+ * Two passes, because one will not fit. A pack the size of "CP5 Mathematic
+ * StudyPack 1.pdf" is 28 pages of dense blocks; the v1 generator's single 6000-token
+ * call truncates long before that. So:
+ *
+ *   1. outline - the model chooses the pack's shape: how many pages, what each is
+ *      called, which objectives it covers, and which block types it will use. This
+ *      is where "the model composes the document" actually happens, and it is cheap.
+ *   2. fill    - one call per group of pages, each narrowed by fillSchema() to only
+ *      the block types that page group's outline asked for. A smaller union is a
+ *      more reliable one, and the shared prefix (block guide + objectives + outline)
+ *      is cached, so the second and later groups pay a tenth on it.
+ *
+ * The founding rule is unchanged from v1: the model selects `objective_indexes` into
+ * a list handed to it and never writes an objective. Extended here to the document
+ * path, where the list itself was assembled by lib/studypack/objectives.ts.
+ *
+ * External URLs are never authored by the model (the Build Kit warns that it will
+ * invent them). A `url` survives only if it already appears in the teacher's own
+ * uploaded text; everything else is stripped here and checked again by the gate.
+ */
+import { call } from '@/lib/llm';
+import type { Objective } from '@/lib/planner';
+import {
+  BLOCK_TYPES, OUTLINE_SCHEMA, fillSchema,
+  type Accent, type Block, type BlockType, type PackLayout, type PackObjective,
+  type PackOutline, type PackV2, type Page,
+} from './schema';
+import { ACCENTS } from './schema';
+
+export interface RegistryWeekLite {
+  week_number: number; topic_label: string; objectives: Objective[];
+}
+
+export type PackSource =
+  | { kind: 'registry'; weeks: RegistryWeekLite[]; weekFrom: number; weekTo: number }
+  | { kind: 'document'; text: string; filename: string; objectives: PackObjective[] };
+
+export interface GeneratePackV2Input {
+  source: PackSource;
+  subjectId: string;
+  yearGroup: string;
+  /** The subject's name for the page furniture ("Mathematics", not "MATH"). The
+   *  school's own packs read "Lusaka Oaktree School - Global Perspectives" in the
+   *  footer, never a code. Falls back to the id when it cannot be resolved. */
+  subjectName?: string | null;
+  curriculum?: string | null;
+}
+
+/** Pages per fill call. Four pages of blocks sits well inside the token budget and
+ *  keeps a single bad response from costing the whole pack. */
+const GROUP = 4;
+const MAX_PAGES = 40;
+
+// ------------------------------------------------------------------- prompts
+
+const SYSTEM = `You build study packs for Lusaka Oaktree School, a Cambridge primary and lower-secondary
+school in Zambia. A study pack is not a set of notes to read. It is a short, active revision
+document: a student should be doing something on every page - answering, thinking, writing or
+following a link - never just reading paragraphs.
+
+You are given the objectives the pack must cover, already numbered. You never write, reword,
+renumber or invent an objective. You only choose which of the supplied objectives each page
+covers, by index.
+
+Every pack must have, somewhere in it:
+- helpful resources near the front, before the content
+- each page's objectives stated, by index
+- short key ideas, never paragraphs of notes
+- practice questions with room to answer, mixing recall with at least one that needs working
+  or explanation
+- at least one prompt or resource per pack that goes beyond recall
+
+Write in plain British English pitched at the year group. Never use an em dash or an en dash;
+use a plain hyphen. Do not write anything a teacher or head of department would sign - no
+comments, no marking, no grades.
+
+Never write a web address. If the teacher's own document contains one you may repeat it
+exactly; otherwise leave every url null and name the resource instead.`;
+
+/** The block vocabulary, given to both passes. Cached, so it is paid for once. */
+const BLOCK_GUIDE = `BLOCK VOCABULARY
+
+Compose each page from these blocks. Choose freely: use what the subject and the page
+actually need, in any order, and do not force a block that does not fit.
+
+resources       A short list of checked, trustworthy resources, grouped by what they help
+                with. Put this near the front of the pack, not at the end. name + why it
+                helps; url only if it appeared in the teacher's own document.
+key_notes       A grid of 2 or 3 columns of short cards, each a heading and a sentence or
+                two. The workhorse for rules, definitions and method summaries.
+key_ideas       Three to six one-line bullets. Never a paragraph.
+worked_example  A question, numbered steps, and the answer. Essential for maths and science.
+practice        Numbered questions with room to answer. marks in [n] where the subject uses
+                them; answer_lines is how many ruled lines to leave (2 for recall, 5 or more
+                for explanation). Ten questions in two columns is the house style for a drill.
+quiz            Multiple choice with the index of the correct option and a one-line reason.
+                Interactive on screen, printed as a lettered question with an answer key.
+glossary        Key terms and one-line definitions. Flashcards on screen.
+checklist       Columns of "I can ..." statements for a student to tick.
+source_card     A short source, with a quick check on how far it can be trusted. For source
+                evaluation, comprehension and document study.
+table           A headed grid. Use for comparisons, conversions, or claim / reason / evidence.
+chart           A small bar or line chart of real figures for the student to read and
+                describe, with an optional aside of useful phrases.
+two_column      Two opposed positions side by side - a view and a counter-argument.
+callout         A short note, tip or warning.
+think           One open question that goes beyond recall, and optionally a named resource.
+reflection      An extended written response, its marks, and self-check statements.
+contents        A contents page. Emit it empty - it is built from the page list.
+closing         A short closing page: a heading and a few study tips.
+
+WIDTH
+
+Every block takes "span": "full" or "half". A half sits beside the block after it, so
+halves are marked in pairs: whenever you write "half", the very next block on that page
+is "half" too. One half on its own is drawn full width, so it changes nothing.
+
+Pair on at least half of the pages that carry two short blocks. A page of nothing but
+full-width blocks is right only when each of them needs the whole width - notes cards, a
+worked example beside them, a callout beside a table are all pairs, and a pack that never
+pairs prints as one column from cover to key.
+
+Use half for two things that are read together: a worked example beside the notes it
+works from, a table beside the callout that explains it, two short blocks that would
+each waste a page's width alone. Use full for anything a pupil writes into or reads
+across - practice questions, a source to study, a chart, a long table. A page of all
+full blocks is fine; a page where nothing is ever paired is a page that looks like
+every other one.
+
+HOW MUCH FITS ON A PAGE
+
+Every page is printed at a fixed size, and a page that holds more than fits runs on to a
+second sheet without its heading. So budget the page:
+
+- Two to four blocks on an A4 landscape page. One to three on a 16:9 slide.
+- A page holds about 450 words of pupil-facing text in total, questions included. Past
+  that it runs on to a second sheet, and a topic split across two sheets is worse than a
+  topic given two pages on purpose.
+- A block worth a whole page on its own - ten practice questions, six key notes cards -
+  takes one, with at most one small block beside it.
+- A pair of halves counts as one block's height, not two, so a page can carry more when
+  it pairs - but the words still have to fit the budget above.
+- Split a topic across consecutive pages rather than stacking it. The school's own maths
+  packs give a topic a key notes page, then a worked examples page, then a practice page.
+- Keep blocks to: key_notes 4 to 6 cards; practice up to 10 questions (two columns) or 5
+  with long answer space; worked_example 1 or 2; quiz up to 5; glossary up to 8 terms;
+  table up to 6 rows; source_card 1 or 2.`;
+
+// --------------------------------------------------------------------- entry
+
+export async function generateStudyPackV2(
+  input: GeneratePackV2Input, userId: string,
+): Promise<{ content: PackV2; usage: { input: number; cached: number; output: number; cost: number } }> {
+  const objectives = objectivesFor(input.source);
+  const grounding = groundingFor(input, objectives);
+  const allowedUrls = input.source.kind === 'document' ? urlsIn(input.source.text) : new Set<string>();
+
+  const usage = { input: 0, cached: 0, output: 0, cost: 0 };
+  const add = (u: { input: number; cached: number; output: number; cost: number }) => {
+    usage.input += u.input; usage.cached += u.cached; usage.output += u.output; usage.cost += u.cost;
+  };
+
+  // ---- pass 1: the shape of the document -----------------------------------
+  const outlineCall = await call<PackOutline>({
+    tier: 'standard',
+    workflow: 'studypack_outline',
+    userId,
+    system: SYSTEM,
+    cached: [BLOCK_GUIDE, grounding],
+    longCache: true,
+    prompt: outlinePrompt(input),
+    schema: OUTLINE_SCHEMA,
+    maxTokens: 6000,
+  });
+  add(outlineCall.usage);
+
+  const outline = normaliseOutline(outlineCall.data, objectives.length, input.subjectId);
+  if (!outline.pages.length) throw new Error('studypack: the outline pass produced no pages');
+
+  const outlineBlock = `PACK OUTLINE\n\n${outline.pages.map(p =>
+    `${p.id} | ${p.eyebrow ?? '-'} | ${p.title} | objectives ${p.objective_indexes.join(',') || '-'} `
+    + `| blocks ${p.block_types.join(', ')}`).join('\n')}`;
+
+  // ---- pass 2: the blocks, a few pages at a time ----------------------------
+  const filled = new Map<string, Block[]>();
+  for (let i = 0; i < outline.pages.length; i += GROUP) {
+    const group = outline.pages.slice(i, i + GROUP);
+    const types = [...new Set(group.flatMap(p => p.block_types))];
+
+    const want = group.map(p =>
+      `${p.id}: "${p.title}"${p.eyebrow ? ` (${p.eyebrow})` : ''}\n`
+      + `  objectives: ${p.objective_indexes.map(n => `[${n}]`).join(' ') || 'none - this is a front or closing page'}\n`
+      + `  blocks, in this order: ${p.block_types.join(', ')}`).join('\n\n');
+
+    let blocks: { pages: { id: string; blocks: Block[] }[] } | null = null;
+    for (let attempt = 0; attempt < 2 && !blocks; attempt++) {
+      try {
+        const res = await call<{ pages: { id: string; blocks: Block[] }[] }>({
+          tier: 'standard',
+          workflow: 'studypack_fill',
+          userId,
+          system: SYSTEM,
+          cached: [BLOCK_GUIDE, grounding, outlineBlock],
+          longCache: true,
+          prompt: `Write the blocks for these pages of the pack, and only these pages.\n\n${want}\n\n`
+            + `Use exactly the block types listed for each page, in that order. Draw every fact from the `
+            + `material above. Set each block's span, and where two short blocks on a page belong `
+            + `side by side mark both of them "half" - see WIDTH. Return one entry per page, `
+            + `keyed by the page id.`,
+          schema: fillSchema(types.length ? types : [...BLOCK_TYPES]),
+          maxTokens: 10_000,
+        });
+        add(res.usage);
+        blocks = res.data;
+      } catch (e) {
+        // A group that will not parse costs its pages their blocks, not the pack.
+        // The gate reports the thin page; the teacher can regenerate.
+        if (attempt === 1) {
+          console.error(`[studypack] fill failed for ${group.map(p => p.id).join(',')}: `
+            + `${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+
+    for (const page of blocks?.pages ?? []) {
+      if (!page?.id) continue;
+      filled.set(page.id, repairBlocks(page.blocks ?? [], allowedUrls));
+    }
+  }
+
+  const pages: Page[] = outline.pages.map(p => ({
+    id: p.id, eyebrow: p.eyebrow, title: p.title,
+    objective_indexes: p.objective_indexes, accent: p.accent,
+    blocks: filled.get(p.id) ?? [],
+  }));
+
+  const refs = [...new Set(
+    pages.flatMap(p => p.objective_indexes)
+      .map(i => objectives[i]?.ref).filter((r): r is string => !!r),
+  )].sort();
+
+  return {
+    content: {
+      version: 2,
+      layout: outline.layout,
+      title: outline.title,
+      subtitle: outline.subtitle,
+      meta: {
+        subject: input.subjectName || input.subjectId, yearGroup: input.yearGroup,
+        curriculum: input.curriculum ?? null,
+        // The footer credit reads better as the document's name than as its file
+        // name: "ART LS1 STUDY PACK S1 2026-2027", not "... .pdf".
+        span: input.source.kind === 'registry'
+          ? `Weeks ${input.source.weekFrom}-${input.source.weekTo}`
+          : input.source.filename.replace(/\.[a-z0-9]{1,5}$/i, ''),
+      },
+      objectives,
+      pages,
+      objective_refs: refs,
+    },
+    usage,
+  };
+}
+
+// ------------------------------------------------------------------ grounding
+
+function objectivesFor(source: PackSource): PackObjective[] {
+  if (source.kind === 'document') return source.objectives;
+  const out: PackObjective[] = [];
+  for (const w of source.weeks) {
+    for (const o of w.objectives ?? []) {
+      out.push({ ref: o.ref ?? null, text: o.text, source: 'registry' });
+    }
+  }
+  return out;
+}
+
+/** The cached block both passes read: the numbered objectives, and - on the document
+ *  path - the teacher's own material, which is what the pack is actually built from. */
+function groundingFor(input: GeneratePackV2Input, objectives: PackObjective[]): string {
+  const lines: string[] = [];
+  const src = input.source;
+
+  if (src.kind === 'registry') {
+    lines.push(`CURRICULUM - ${input.yearGroup} ${input.subjectId}, weeks ${src.weekFrom}-${src.weekTo}`);
+    let i = 0;
+    for (const w of src.weeks) {
+      lines.push(`\nWeek ${w.week_number}: ${w.topic_label}`);
+      for (const o of w.objectives ?? []) {
+        lines.push(`  [${i}] ${o.ref ? `${o.ref} - ` : ''}${o.text}`);
+        i++;
+      }
+    }
+    return lines.join('\n');
+  }
+
+  lines.push(`OBJECTIVES - ${input.yearGroup} ${input.subjectId}, from ${src.filename}`);
+  objectives.forEach((o, i) => {
+    const tag = o.source === 'file' ? ' (stated in the file, no syllabus code)' : '';
+    lines.push(`  [${i}] ${o.ref ? `${o.ref} - ` : ''}${o.text}${tag}`);
+  });
+  lines.push(`\nTEACHER'S MATERIAL - ${src.filename}`);
+  lines.push('Build the pack from this content. Keep the teacher\'s facts, examples and terminology.');
+  lines.push('');
+  lines.push(src.text.slice(0, 120_000));
+  return lines.join('\n');
+}
+
+function outlinePrompt(input: GeneratePackV2Input): string {
+  const src = input.source;
+  const what = src.kind === 'registry'
+    ? `the curriculum weeks above (weeks ${src.weekFrom} to ${src.weekTo})`
+    : `the teacher's material above`;
+  return `Plan the study pack for ${what}.
+
+Decide its shape yourself: how many pages it needs, what each page is called, which objectives
+each page covers, and which blocks each page will carry. Let the subject lead. A maths pack
+wants key notes, worked examples and drill questions; a skills subject wants sources, tables,
+data and extended questions; a practical subject wants short notes, callouts and questions to
+attempt.
+
+Choose the layout: "a4-landscape" for a document a student works through with a pen, or
+"slide-16x9" for a topic-by-topic deck.
+
+Give each page an accent colour from ${ACCENTS.join(', ')}. Colour carries the pack's
+structure, so use it: a run of pages on one topic shares an accent and the next topic takes
+a different one, and a page that does a different job from the pages around it - a review,
+a source study, a reflection - is allowed to stand out. Never give two touching pages the
+same accent by accident.
+
+Give the pack a front page carrying its resources, and a closing page. Keep it between 6 and
+${MAX_PAGES} pages. Respect the page budget above: two to four blocks on an A4 landscape page,
+one to three on a slide, and another page rather than a crowded one. Return the outline only -
+the blocks are written next.`;
+}
+
+// -------------------------------------------------------------------- repair
+
+/**
+ * The colour a subject's packs start from.
+ *
+ * Two packs for the same subject should feel like the same subject, and the model has
+ * no memory of the last one it wrote. Deriving the starting accent from the subject id
+ * gives maths its colour and Global Perspectives another, every time, without anyone
+ * maintaining a table of them.
+ */
+function homeAccent(subjectId: string): Accent {
+  let n = 0;
+  for (const ch of subjectId.toUpperCase()) n = (n * 31 + ch.charCodeAt(0)) % 9973;
+  return ACCENTS[n % ACCENTS.length];
+}
+
+function normaliseOutline(raw: PackOutline, objectiveCount: number, subjectId: string): PackOutline {
+  const layout: PackLayout = raw?.layout === 'slide-16x9' ? 'slide-16x9' : 'a4-landscape';
+  const seen = new Set<string>();
+  const home = homeAccent(subjectId);
+  let previous: Accent | null = null;
+  const pages = (raw?.pages ?? []).slice(0, MAX_PAGES).map((p, i) => {
+    // Ids address a page across two calls, so they must be unique and present.
+    let id = String(p?.id ?? '').trim() || `p${i + 1}`;
+    while (seen.has(id)) id = `${id}-${i}`;
+    seen.add(id);
+    // The model's choice stands unless it repeats the page before it: two touching
+    // pages in one colour read as one long page, which is the opposite of what the
+    // accent is for. Where it chose nothing, the pack walks its subject's palette.
+    let accent: Accent = ACCENTS.includes(p?.accent as Accent)
+      ? (p.accent as Accent)
+      : ACCENTS[(ACCENTS.indexOf(home) + i) % ACCENTS.length];
+    if (accent === previous) accent = ACCENTS[(ACCENTS.indexOf(accent) + 1) % ACCENTS.length];
+    previous = accent;
+    return {
+      id,
+      eyebrow: p?.eyebrow ? String(p.eyebrow) : null,
+      title: String(p?.title ?? `Page ${i + 1}`),
+      // An index outside the supplied list is the one way a pack could cite an
+      // objective that does not exist. Drop it rather than resolve it to undefined.
+      objective_indexes: [...new Set((p?.objective_indexes ?? [])
+        .filter(n => Number.isInteger(n) && n >= 0 && n < objectiveCount))],
+      accent,
+      // Hard ceiling on page density. A sheet is a fixed size, and a page asked to
+      // hold six blocks runs on to a second sheet that carries no heading, no
+      // objectives and no crest - which is exactly what the Reference Guide's
+      // "branding on every page" rule forbids. The prompt asks for two to four; this
+      // is what happens when it is not listened to.
+      block_types: (p?.block_types ?? [])
+        .filter((t): t is BlockType => (BLOCK_TYPES as readonly string[]).includes(t))
+        .slice(0, layout === 'slide-16x9' ? 3 : 4),
+    };
+  });
+  return {
+    title: String(raw?.title ?? 'Study Pack'),
+    subtitle: raw?.subtitle ? String(raw.subtitle) : null,
+    layout, pages,
+  };
+}
+
+/** Web addresses already present in the teacher's document, normalised for comparison. */
+function urlsIn(text: string): Set<string> {
+  const out = new Set<string>();
+  const re = /(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s,;)\]]*)?)/gi;
+  for (const m of text.matchAll(re)) out.add(m[1].toLowerCase().replace(/[.,)\]]+$/, ''));
+  return out;
+}
+
+/**
+ * Drop a leading "1." or "2)" from generated text.
+ *
+ * The renderer numbers practice questions with a badge and worked-example steps with
+ * an ordered list, so a model that also numbers its own text prints "1. 1. Write 3,482
+ * in words." Asking it not to in the prompt half works; removing it here always does.
+ */
+/**
+ * Also drops a leading "[0]" - the objective index the model is given to tag pages
+ * with, which it wrote into the checklist items themselves: "[0] I can gather
+ * information from a range of reliable sources." No pupil needs to read that.
+ */
+function unnumber(text: string): string {
+  return String(text ?? '')
+    .replace(/^\s*\[\d{1,2}(?:,\s*\d{1,2})*\]\s*/, '')
+    .replace(/^\s*\d{1,2}\s*[.)]\s+/, '')
+    .trim();
+}
+
+function keepUrl(url: string | null, allowed: Set<string>): string | null {
+  if (!url) return null;
+  const norm = url.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+  if (!norm) return null;
+  for (const a of allowed) if (a === norm || a.startsWith(norm) || norm.startsWith(a)) return url.trim();
+  return null;
+}
+
+/**
+ * How much of each block fits on one printed sheet.
+ *
+ * The prompt asks for these; this is what enforces them. A page is a fixed size and
+ * the print renderer never clips, so a block that runs long does not get cut off - it
+ * pushes the rest of the section onto a continuation sheet with no heading, no
+ * objectives and no crest. Dropping the eleventh question is the smaller loss.
+ */
+const CAP = {
+  resourceGroups: 3, resourceItems: 3, notes: 6, workedExamples: 2, practice: 10,
+  quiz: 5, glossary: 8, checklistColumns: 3, checklistItems: 6, sources: 2,
+  tableRows: 8, chartSeries: 8, asideItems: 5, selfCheck: 4, closingTips: 4,
+} as const;
+
+/**
+ * Make every block safe to render.
+ *
+ * The v1 generator dropped quiz questions whose correct index was out of range
+ * rather than draw a broken button set (lib/studypack.ts). Same idea, one rule per
+ * block type: a block that cannot be drawn coherently is dropped, not rendered
+ * half-formed.
+ */
+export function repairBlocks(blocks: Block[], allowedUrls: Set<string>): Block[] {
+  const out: Block[] = [];
+  for (const b of blocks ?? []) {
+    if (!b || typeof b !== 'object' || !(BLOCK_TYPES as readonly string[]).includes(b.type)) continue;
+    switch (b.type) {
+      case 'resources': {
+        const groups = (b.groups ?? [])
+          .map(g => ({
+            label: String(g?.label ?? ''),
+            items: (g?.items ?? []).filter(i => i?.name).slice(0, CAP.resourceItems).map(i => ({
+              name: String(i.name), why: String(i.why ?? ''), url: keepUrl(i.url ?? null, allowedUrls),
+            })),
+          }))
+          .filter(g => g.items.length).slice(0, CAP.resourceGroups);
+        if (groups.length) out.push({ ...b, groups });
+        break;
+      }
+      case 'key_notes': {
+        const cards = (b.cards ?? []).filter(c => c?.heading || c?.body).slice(0, CAP.notes)
+          .map(c => ({ heading: String(c.heading ?? ''), body: String(c.body ?? '') }));
+        if (cards.length) out.push({ ...b, columns: b.columns === 3 ? 3 : 2, cards });
+        break;
+      }
+      case 'key_ideas': {
+        const items = (b.items ?? []).map(String).filter(Boolean).slice(0, 6);
+        if (items.length) out.push({ ...b, items });
+        break;
+      }
+      case 'worked_example': {
+        const examples = (b.examples ?? []).filter(e => e?.prompt).slice(0, CAP.workedExamples).map(e => ({
+          prompt: unnumber(String(e.prompt)), steps: (e.steps ?? []).map(s => unnumber(String(s))).filter(Boolean),
+          answer: String(e.answer ?? ''),
+        }));
+        if (examples.length) out.push({ ...b, examples });
+        break;
+      }
+      case 'practice': {
+        const questions = (b.questions ?? []).filter(q => q?.text).slice(0, CAP.practice).map(q => ({
+          text: unnumber(String(q.text)),
+          marks: Number.isFinite(q.marks as number) ? Number(q.marks) : null,
+          answer_lines: Number.isFinite(q.answer_lines as number)
+            ? Math.min(12, Math.max(0, Number(q.answer_lines))) : null,
+        }));
+        if (questions.length) out.push({ ...b, columns: b.columns === 2 ? 2 : 1, questions });
+        break;
+      }
+      case 'quiz': {
+        // Carried over from v1: a correct index outside the options is a broken
+        // question, not a hard question.
+        const questions = (b.questions ?? []).filter(q =>
+          q?.q && (q.options?.length ?? 0) >= 2 && Number.isInteger(q.correct)
+          && q.correct >= 0 && q.correct < q.options.length).slice(0, CAP.quiz)
+          // The quiz numbers its own questions on the page and letters the options.
+          .map(q => ({ ...q, q: unnumber(String(q.q)), options: q.options.map(o => unnumber(String(o))) }));
+        if (questions.length) out.push({ ...b, questions });
+        break;
+      }
+      case 'glossary': {
+        const terms = (b.terms ?? []).filter(t => t?.term).slice(0, CAP.glossary).map(t => ({
+          term: String(t.term), definition: String(t.definition ?? ''),
+        }));
+        if (terms.length) out.push({ ...b, terms });
+        break;
+      }
+      case 'checklist': {
+        const columns = (b.columns ?? []).map(c => ({
+          heading: String(c?.heading ?? ''), blurb: c?.blurb ? String(c.blurb) : null,
+          items: (c?.items ?? []).map(i => unnumber(String(i))).filter(Boolean).slice(0, CAP.checklistItems),
+        })).filter(c => c.items.length).slice(0, CAP.checklistColumns);
+        if (columns.length) out.push({ ...b, columns });
+        break;
+      }
+      case 'source_card': {
+        const sources = (b.sources ?? []).filter(s => s?.text).slice(0, CAP.sources).map(s => ({
+          label: String(s.label ?? 'Source'), text: String(s.text), quick_check: String(s.quick_check ?? ''),
+        }));
+        if (sources.length) out.push({ ...b, sources });
+        break;
+      }
+      case 'table': {
+        const headers = (b.headers ?? []).map(String);
+        // A row of the wrong width draws a ragged grid; drop it.
+        const rows = (b.rows ?? [])
+          .map(r => ({ cells: (r?.cells ?? []).map(String) }))
+          .filter(r => r.cells.length === headers.length).slice(0, CAP.tableRows);
+        if (headers.length && rows.length) out.push({ ...b, headers, rows });
+        break;
+      }
+      case 'chart': {
+        const series = (b.series ?? [])
+          .filter(s => s?.label != null && Number.isFinite(Number(s.value)))
+          .map(s => ({ label: String(s.label), value: Number(s.value) })).slice(0, CAP.chartSeries);
+        if (series.length >= 2) {
+          out.push({
+            ...b, kind: b.kind === 'line' ? 'line' : 'bar', series,
+            aside_items: (b.aside_items ?? []).map(String).filter(Boolean).slice(0, CAP.asideItems),
+          });
+        }
+        break;
+      }
+      case 'two_column': {
+        if (b.left?.body || b.right?.body) {
+          out.push({
+            ...b,
+            left: { heading: String(b.left?.heading ?? ''), body: String(b.left?.body ?? '') },
+            right: { heading: String(b.right?.heading ?? ''), body: String(b.right?.body ?? '') },
+          });
+        }
+        break;
+      }
+      case 'callout':
+        if (b.body) out.push({ ...b, tone: ['note', 'tip', 'warning'].includes(b.tone) ? b.tone : 'note' });
+        break;
+      case 'think':
+        if (b.question) out.push({ ...b, resource_url: keepUrl(b.resource_url ?? null, allowedUrls) });
+        break;
+      case 'reflection':
+        if (b.prompt) out.push({ ...b, self_check: (b.self_check ?? []).map(String).filter(Boolean).slice(0, CAP.selfCheck) });
+        break;
+      case 'closing':
+        out.push({ ...b, tips: (b.tips ?? []).map(String).filter(Boolean).slice(0, CAP.closingTips) });
+        break;
+      case 'contents':
+        out.push(b);
+        break;
+    }
+  }
+  return settleSpans(out.map(deIndex));
+}
+
+/**
+ * Keep "half" only where half a page can hold it.
+ *
+ * A contents page or a ten-question drill given half the width prints a column of
+ * two-word lines. Size decides it, not type alone: four questions beside the notes they
+ * test is a good page, ten is not, and a chart or a live quiz needs the full width
+ * whatever it holds.
+ */
+function fitsHalf(b: Block): boolean {
+  switch (b.type) {
+    case 'contents': case 'quiz': case 'chart': case 'reflection':
+      return false;
+    case 'practice':
+      return b.questions.length <= 4;
+    case 'table':
+      return b.rows.length <= 4 && b.headers.length <= 3;
+    case 'key_notes':
+      return b.cards.length <= 3;
+    case 'glossary':
+      return b.terms.length <= 4;
+    default:
+      return true;
+  }
+}
+
+/** Words in a block, counted over whatever strings it holds. */
+function blockWords(b: Block): number {
+  let n = 0;
+  const walk = (v: unknown): void => {
+    if (typeof v === 'string') n += v.split(/\s+/).filter(Boolean).length;
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.entries(v).forEach(([k, x]) => { if (k !== 'type' && k !== 'span') walk(x); });
+  };
+  walk(b);
+  return n;
+}
+
+/** Short enough that half a page is not a column of two-word lines. */
+const HALF_WORDS = 55;
+
+/**
+ * Settle every block's width, reading the page a pair at a time.
+ *
+ * The model is asked to mark pairs and mostly will not - it answers "full" for
+ * everything however the instruction is worded - so the marking is treated as a hint,
+ * not the decision. Two neighbours that both fit half a page and are short enough to
+ * read there are set side by side; a half the model marked alone still takes its
+ * neighbour when that one fits, because a lone half is drawn full width and would have
+ * meant nothing.
+ *
+ * Everything else is full width, which is the safe answer: a block that needed the page
+ * and only got half of it is a worse mistake than a page that never pairs.
+ */
+function settleSpans(blocks: Block[]): Block[] {
+  const out: Block[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const here = blocks[i], next = blocks[i + 1];
+    const pairable = (b: Block | undefined, hinted: boolean): b is Block =>
+      !!b && fitsHalf(b) && (blockWords(b) <= HALF_WORDS || hinted);
+    if (pairable(here, here.span === 'half') && pairable(next, next?.span === 'half')) {
+      out.push({ ...here, span: 'half' }, { ...next, span: 'half' });
+      i++;
+      continue;
+    }
+    out.push({ ...here, span: 'full' });
+  }
+  return out;
+}
+
+
+/** Strip the model's own objective tagging out of a block, and drop what is left empty. */
+function deIndex<T extends Block>(b: T): T {
+  let out: T = b;
+  if ('intro' in out && typeof out.intro === 'string') {
+    out = { ...out, intro: stripTags(out.intro) || null };
+  }
+  // A key notes card headed "Objectives" whose body was nothing but tags -
+  // "[10] Monochromatic painting [11] Colour theory" - is a tagging note to itself,
+  // not a note to a pupil, so it goes rather than printing empty.
+  if ('cards' in out && Array.isArray(out.cards)) {
+    const cards = out.cards
+      .map(c => ({ ...c, heading: stripTags(String(c.heading ?? "")), body: stripTags(String(c.body ?? "")) }))
+      .filter(c => c.body.length > 2);
+    out = { ...out, cards };
+  }
+  if ('body' in out && typeof out.body === 'string') {
+    out = { ...out, body: stripTags(out.body) };
+  }
+  // The open questions carry it too: a think block asked "Objectives [4] and [5]: Where
+  // might you notice diffusion?" - the tagging read as part of the question.
+  if ('heading' in out && typeof out.heading === 'string') {
+    out = { ...out, heading: stripTags(out.heading) };
+  }
+  if ('question' in out && typeof out.question === 'string') {
+    out = { ...out, question: stripTags(out.question) };
+  }
+  if ('prompt' in out && typeof out.prompt === 'string') {
+    out = { ...out, prompt: stripTags(out.prompt) };
+  }
+  return out;
+}
+
+/**
+ * Take the objective indexes back out of a block's own words.
+ *
+ * The model is handed the objectives numbered so it can tag each page with the ones
+ * it covers, and it wrote the tags into the pack as well: a practice block introduced
+ * itself as "Objectives: [0] [2] [9] [10]". The tagging belongs in
+ * `objective_indexes`, which the page header already prints in full.
+ */
+function stripTags(text: string): string {
+  return String(text ?? "")
+    .replace(/\[\d{1,2}\]/g, "")
+    // The word that introduced them goes with them - "Objectives [4] and [5]: Where
+    // might you notice diffusion?" - but only when a colon or dash shows it was a
+    // label. "Objectives are what a pack is for" is a sentence, and stays one.
+    .replace(/^\s*Objectives?\b[\s,]*(?:and[\s,]*)*[:\-–—]\s*/i, "")
+    .replace(/\s{2,}/g, " ")
+    // A tag taken out of the middle leaves its space behind: "Explain diffusion ."
+    .replace(/\s+([.,;:?!])/g, "$1")
+    // Bracketless too: one pack introduced its practice questions with the bare
+    // list "0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16".
+    .replace(/^[\d,\s]+$/, "")
+    .trim();
+}

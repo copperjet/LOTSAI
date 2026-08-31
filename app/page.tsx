@@ -61,8 +61,24 @@ interface PackMatch {
 interface PackResult {
   studyPackId: string | null; title: string;
   units: { label: string; topics: number }[]; refs: string[]; glossary: number;
+  /** v2 packs are pages of blocks, not units of topics. */
+  pages?: { title: string; blocks: number }[];
+  layout?: 'a4-landscape' | 'slide-16x9';
+  objectiveSources?: { registry: number; matched: number; file: number };
+  /** Objectives that did not come from the registry, for the teacher to confirm. */
+  fromFile?: { ref: string | null; text: string; source: 'matched' | 'file' }[];
   fromUpload?: { filename: string; resolved: number; unresolved: string[] };
 }
+/** Shorter than this is not material to build from - /api/ingest/text refuses it too. */
+const MIN_PASTE = 120;
+
+/** Asking at length is still asking. */
+function isQuestion(text: string): boolean {
+  const t = text.trim();
+  return t.endsWith('?')
+    || /^(what|why|how|when|where|which|who|whose|is|are|do|does|did|can|could|should|would|tell me|explain)\b/i.test(t);
+}
+
 interface UploadResult {
   uploadId: string; filename: string; textLength: number;
   files?: { filename: string; kind: string; textLength: number }[];
@@ -272,6 +288,10 @@ export default function App() {
     if (/review|approve|queue/.test(q)) return doReview();
     if (/registry|conflict|sign.?off/.test(q)) return doRegistry();
     if (/coverage/.test(q)) return doCoverage();
+    // Long enough to be material rather than a question, and not phrased as one: a
+    // teacher pasting the outcomes off a scheme of work wants a pack from them, not an
+    // answer about them. Questions stay questions however long they run.
+    if (text.trim().length >= MIN_PASTE && !isQuestion(text)) return doPackFromText(text.trim());
     // Nothing above started a workflow, which does not make this open-ended work.
     // The school's own calendar and registry answer a great many questions, and
     // refusing those was the router having no answer rather than the product
@@ -656,6 +676,19 @@ export default function App() {
     const cal = await loadCalendar();
     if (!cal.classes.length) return say(<p className="said">You have no classes to check a file against.</p>);
     say(<UploadCard classes={cal.classes} onBuild={doBuildFromUpload} initial={initial} />);
+  }
+
+  /**
+   * Material pasted straight into the thread.
+   *
+   * A teacher with a paragraph of outcomes and no file had nowhere to put it: anything
+   * the router did not recognise became a question for lib/ask.ts, so the notes came
+   * back answered instead of built.
+   */
+  async function doPackFromText(text: string) {
+    const cal = await loadCalendar();
+    if (!cal.classes.length) return say(<p className="said">You have no classes to check this against.</p>);
+    say(<PasteCard classes={cal.classes} text={text} onBuild={doBuildFromUpload} />);
   }
 
   /**
@@ -1392,17 +1425,25 @@ function StudyPackPicker({ classes, today, onPick, onUpload }: {
 function PackCard({ r, onOpen, onPdf, onApprove }: {
   r: PackResult; onOpen: () => void; onPdf: () => void; onApprove: () => void;
 }) {
+  const parts = r.pages?.length
+    ? r.pages.map(p => ({ label: p.title, count: p.blocks, noun: 'section' }))
+    : r.units.map(u => ({ label: u.label, count: u.topics, noun: 'topic' }));
+  const fromFile = r.fromFile ?? [];
+
   return (
     <>
       <p className="said">
-        Built. <b>{r.title}</b> - objectives are copied from the curriculum, the key ideas, quizzes and
-        glossary are written for the age group.
+        Built. <b>{r.title}</b> - {fromFile.length
+          ? <>the objectives below came from your file rather than the curriculum, and the pages,
+            questions and glossary are written for the age group.</>
+          : <>objectives are copied from the curriculum, and the pages, questions and glossary are
+            written for the age group.</>}
       </p>
       <div className="c pad">
         <div className="eyebrow" style={{ marginBottom: 6 }}>What is in it</div>
         <ul style={{ margin: '0 0 10px', paddingLeft: 18, fontSize: 13.5 }}>
-          {r.units.map((u, i) => (
-            <li key={i}>{u.label} - {u.topics} topic{u.topics === 1 ? '' : 's'}</li>
+          {parts.map((u, i) => (
+            <li key={i}>{u.label} - {u.count} {u.noun}{u.count === 1 ? '' : 's'}</li>
           ))}
         </ul>
         <div className="row" style={{ gap: 5 }}>
@@ -1410,6 +1451,24 @@ function PackCard({ r, onOpen, onPdf, onApprove }: {
           <span className="pill grey">{r.glossary} glossary term{r.glossary === 1 ? '' : 's'}</span>
         </div>
       </div>
+
+      {fromFile.length > 0 && (
+        <div className="c pad" style={{ marginTop: 10 }}>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>
+            Read from your file - please confirm before sharing
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+            {fromFile.map((o, i) => (
+              <li key={i}>
+                {o.ref ? <span className="pill ref">{o.ref}</span> : <span className="pill warn">no code</span>}{' '}
+                {o.text}
+                {o.source === 'matched' && <span style={{ color: 'var(--muted)' }}> (matched to the curriculum by wording)</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="acts" style={{ marginTop: 12 }}>
         <button className="btn primary" onClick={onApprove}>Approve &amp; send to Drive</button>
         <button className="btn" onClick={onOpen}>Open the study pack</button>
@@ -1546,8 +1605,8 @@ function UploadCard({ classes, onBuild, initial }: {
         {files.length
           ? <>Which subject {files.length === 1 ? 'is this' : 'are these'} for?</>
           : <>Which subject is this for?</>}
-        {' '}I check every objective code in it against that subject&rsquo;s curriculum, and build only
-        from the ones the curriculum holds.
+        {' '}I check every objective code in it against that subject&rsquo;s curriculum. If it names
+        none, I read the outcomes it states instead and show you which are not the school&rsquo;s.
       </p>
       <div className="row" style={{ marginTop: 10, gap: 7 }}>
         {classes.map(c => (
@@ -1599,35 +1658,133 @@ function UploadCard({ classes, onBuild, initial }: {
       </div>
 
       {state === 'done' && result && (
-        <div className="c pad" style={{ marginTop: 12 }}>
-          <p style={{ fontSize: 13.5, margin: '0 0 8px' }}>{result.note}</p>
-          {result.resolved.length > 0 && (
-            <>
-              <div className="eyebrow" style={{ marginBottom: 5 }}>Resolved - these seed the pack</div>
-              <div className="row" style={{ gap: 5 }}>
-                {result.resolved.map(o => <span key={o.ref} className="pill ref">{o.ref}</span>)}
-              </div>
-            </>
-          )}
-          {result.unresolved.length > 0 && (
-            <>
-              <div className="eyebrow" style={{ margin: '11px 0 5px' }}>Not in the curriculum - never used</div>
-              <div className="row" style={{ gap: 5 }}>
-                {result.unresolved.map(ref => <span key={ref} className="pill warn">{ref}</span>)}
-              </div>
-            </>
-          )}
-          <div className="acts" style={{ marginTop: 13 }}>
-            <button className="btn primary" disabled={!result.resolved.length}
-                    onClick={() => onBuild(result.uploadId)}>
-              {result.resolved.length
-                ? `Build from ${result.resolved.length} resolved objective${result.resolved.length === 1 ? '' : 's'}`
-                : 'Nothing resolved to build from'}
-            </button>
-          </div>
-        </div>
+        <SourceResult result={result} onBuild={onBuild} noun="file" />
       )}
     </>
+  );
+}
+
+/**
+ * The third door: material that was never a file.
+ *
+ * Notes typed or pasted straight into the thread - a topic list, the outcomes off a
+ * scheme of work, a paragraph from an email. It is reconciled and stored exactly as an
+ * upload is (/api/ingest/text), so everything past this point - the pack, its PDF, the
+ * approval that sends it to Drive - is the one path, not a weaker copy of it.
+ *
+ * The text stays editable here. A paste usually carries something the teacher did not
+ * mean to send, and fixing it before the pack is written is cheaper than after.
+ */
+function PasteCard({ classes, text: initial, onBuild }: {
+  classes: ClassCal[]; text: string; onBuild: (uploadId: string) => void;
+}) {
+  const [chosen, setChosen] = useState(classes[0]?.id ?? '');
+  const k = classes.find(c => c.id === chosen) ?? classes[0];
+  const [text, setText] = useState(initial);
+  const [state, setState] = useState<'idle' | 'reading' | 'done' | 'error'>('idle');
+  const [result, setResult] = useState<UploadResult | null>(null);
+  const [err, setErr] = useState('');
+
+  async function reconcile() {
+    if (!k || text.trim().length < MIN_PASTE) return;
+    setState('reading'); setErr(''); setResult(null);
+    try {
+      const r = await fetch('/api/ingest/text', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        // The first line names the material, so the pack's footer says what it was
+        // built from rather than "Pasted text".
+        body: JSON.stringify({
+          text, subjectId: k.subject_id, yearGroup: k.year_group,
+          title: text.trim().split('\n')[0].slice(0, 60),
+        }),
+      }).then(r => r.json());
+      if (r.error) { setState('error'); setErr(r.message ?? r.error); return; }
+      setResult(r as UploadResult); setState('done');
+    } catch { setState('error'); setErr('That could not be sent. Nothing was saved - try again.'); }
+  }
+
+  if (!k) return null;
+
+  return (
+    <>
+      <p className="said">
+        Which subject is this for? I check every objective code in it against that
+        subject&rsquo;s curriculum. If it names none, I read the outcomes it states instead and
+        show you which are not the school&rsquo;s.
+      </p>
+      <div className="row" style={{ marginTop: 10, gap: 7 }}>
+        {classes.map(c => (
+          <button key={c.id} className={`chip ${c.id === k.id ? 'key' : ''}`} onClick={() => setChosen(c.id)}>
+            {c.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="c pad" style={{ marginTop: 11 }}>
+        <textarea className="paste" rows={8} value={text} onChange={e => setText(e.target.value)}
+                  aria-label="The text the pack will be built from" />
+        <div className="acts" style={{ marginTop: 10 }}>
+          <button className="btn" disabled={state === 'reading' || text.trim().length < MIN_PASTE}
+                  onClick={reconcile}>
+            {state === 'reading' ? 'Reading and checking…' : 'Check against the curriculum'}
+          </button>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+            {text.trim().length < MIN_PASTE
+              ? `${MIN_PASTE - text.trim().length} more characters needed`
+              : `${text.trim().length} characters`}
+          </span>
+        </div>
+        {state === 'error' && <small className="cerr" style={{ display: 'block', marginTop: 8 }}>{err}</small>}
+      </div>
+
+      {state === 'done' && result && (
+        <SourceResult result={result} onBuild={onBuild} noun="text" />
+      )}
+    </>
+  );
+}
+
+/**
+ * What reconciliation found, and the button that builds from it.
+ *
+ * Identical whether the material was a file or text a teacher pasted: the same resolved
+ * and unresolved codes, the same rule that no resolved code is not a refusal - the
+ * objectives are then read from the material itself and flagged for confirmation, never
+ * silently adopted.
+ */
+function SourceResult({ result, onBuild, noun }: {
+  result: UploadResult; onBuild: (uploadId: string) => void; noun: 'file' | 'text';
+}) {
+  return (
+    <div className="c pad" style={{ marginTop: 12 }}>
+      <p style={{ fontSize: 13.5, margin: '0 0 8px' }}>{result.note}</p>
+      {result.resolved.length > 0 && (
+        <>
+          <div className="eyebrow" style={{ marginBottom: 5 }}>Resolved - these seed the pack</div>
+          <div className="row" style={{ gap: 5 }}>
+            {result.resolved.map(o => <span key={o.ref} className="pill ref">{o.ref}</span>)}
+          </div>
+        </>
+      )}
+      {result.unresolved.length > 0 && (
+        <>
+          <div className="eyebrow" style={{ margin: '11px 0 5px' }}>Not in the curriculum - never used</div>
+          <div className="row" style={{ gap: 5 }}>
+            {result.unresolved.map(ref => <span key={ref} className="pill warn">{ref}</span>)}
+          </div>
+        </>
+      )}
+      <div className="acts" style={{ marginTop: 13 }}>
+        <button className="btn primary" disabled={!result.textLength}
+                onClick={() => onBuild(result.uploadId)}>
+          {result.resolved.length
+            ? `Build from ${result.resolved.length} resolved objective${result.resolved.length === 1 ? '' : 's'}`
+            : result.textLength
+              ? `Build from the outcomes stated in the ${noun}`
+              : `Nothing could be read from this ${noun}`}
+        </button>
+      </div>
+    </div>
   );
 }
 

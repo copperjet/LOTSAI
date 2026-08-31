@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
 import * as engine from '@/lib/engine';
-import { packWorkKey, type PackContent, type RegistryWeekLite } from '@/lib/studypack';
+import { packWorkKey } from '@/lib/studypack';
+import type { GeneratePackV2Input, RegistryWeekLite } from '@/lib/studypack/generate';
+import type { PackV2 } from '@/lib/studypack/schema';
+import { sourceCounts } from '@/lib/studypack/objectives';
+import { insertPack, packSummary } from '@/lib/studypack/persist';
 import { storeArtefact } from '@/lib/pdf/store';
 import { viewUrl } from '@/lib/artefactUrl';
 
 export const runtime = 'nodejs';
-export const maxDuration = 90;
+export const maxDuration = 300;   // two model passes over a long span
 
 /**
  * POST /api/studypack/generate  { classId, weekFrom, weekTo }
@@ -14,8 +18,8 @@ export const maxDuration = 90;
  *
  * Generate a study pack over a span of signed-off weeks, store it, render the
  * interactive HTML to the artefacts bucket. Objectives are retrieved from the
- * registry; the pedagogy is generated. Runs through the same engine the planner
- * does — a different Standard, the same pipeline.
+ * registry; the pedagogy and the document's whole shape are generated. Runs through
+ * the same engine the planner does — a different Standard, the same pipeline.
  */
 export async function POST(req: NextRequest) {
   const db = admin();
@@ -44,18 +48,27 @@ export async function POST(req: NextRequest) {
     objectives: w.objectives as RegistryWeekLite['objectives'],
   }));
 
-  const out = await engine.generate(std, {
-    weeks: grounding, yearGroup: klass.year_group, subjectId: klass.subject_id, weekFrom, weekTo,
-  }, user.id) as { content: PackContent; usage: unknown };
+  // The subject's name, not its code, is what goes on the page furniture.
+  const { data: subject } = await db.from('subject').select('name').eq('id', klass.subject_id).maybeSingle();
+
+  const input: GeneratePackV2Input = {
+    source: { kind: 'registry', weeks: grounding, weekFrom, weekTo },
+    subjectId: klass.subject_id, yearGroup: klass.year_group,
+    subjectName: subject?.name ?? null,
+  };
+  const out = await engine.generate(std, input, user.id) as { content: PackV2; usage: unknown };
   const content = out.content;
 
-  const key = packWorkKey({ subjectId: klass.subject_id, yearGroup: klass.year_group, academicYear: '2026-27', weekFrom, refs: content.objective_refs });
+  const key = packWorkKey({
+    subjectId: klass.subject_id, yearGroup: klass.year_group,
+    academicYear: '2026-27', weekFrom, refs: content.objective_refs,
+  });
 
-  const { data: pack } = await db.from('study_pack').insert({
+  const pack = await insertPack({
     work_key: key, academic_year: '2026-27', year_group: klass.year_group, subject_id: klass.subject_id,
     class_id: classId, week_from: weekFrom, week_to: weekTo, title: content.title,
     objective_refs: content.objective_refs, content, author_id: user.id, status: 'draft',
-  }).select('id').single();
+  }, { content_version: 2, layout: content.layout, source_kind: 'registry', objective_sources: content.objectives });
 
   // Render the interactive HTML and store it. Like the planner, this never blocks
   // the response if it fails — the pack is saved and can be re-rendered.
@@ -64,14 +77,13 @@ export async function POST(req: NextRequest) {
     await db.from('study_pack').update({ storage_path: render.path }).eq('id', pack.id);
   }
 
-  await audit(user.id, 'studypack.create', 'study_pack', pack?.id, { weeks: `${weekFrom}-${weekTo}`, refs: content.objective_refs.length });
+  await audit(user.id, 'studypack.create', 'study_pack', pack?.id,
+    { weeks: `${weekFrom}-${weekTo}`, refs: content.objective_refs.length, pages: content.pages.length });
 
   return NextResponse.json({
     studyPackId: pack?.id ?? null,
-    title: content.title,
-    units: content.units.map(u => ({ label: u.unit_label, topics: u.topics.length })),
-    refs: content.objective_refs,
-    glossary: content.glossary.length,
+    ...packSummary(content),
+    objectiveSources: sourceCounts(content.objectives),
     render,
   });
 }

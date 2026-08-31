@@ -133,13 +133,37 @@ def week_number(cell: str):
     return None
 
 
+def unwrap(lines):
+    """
+    Rejoin an objective that a PDF broke across visual lines.
+
+    A .docx cell puts a newline between objectives and nowhere else, so its lines
+    arrive whole. PyMuPDF has no such thing to go on: it ends a line wherever the
+    text ran out of column, and "Research: Gather / information from a range of /
+    reliable sources" imported as three objectives. LS3 GP's overview is a PDF and
+    its four weeks came in as 125 fragments, which is what the study pack then put
+    on its cover, mid-sentence.
+
+    A line continues the one above when that line did not finish a sentence and this
+    one opens in lower case. An objective of its own starts with a capital, so a
+    .docx's already-whole lines pass through untouched.
+    """
+    out = []
+    for line in lines:
+        if out and not re.search(r'[.;:!?]$', out[-1]) and re.match(r'[a-z(]', line):
+            out[-1] = f'{out[-1]} {line}'
+        else:
+            out.append(line)
+    return out
+
+
 def split_objectives(text: str):
     """
     Return [{ref, text}]. A reference is copied verbatim when present.
     When absent the objective still imports — as topic-only, flagged.
     """
     body = re.split(r'\bResources\b', text, flags=re.I)[0]
-    lines = [l.strip(' -•\t') for l in body.split('\n') if l.strip(' -•\t')]
+    lines = unwrap([l.strip(' -•\t') for l in body.split('\n') if l.strip(' -•\t')])
     out = []
     for line in lines:
         if len(line) < 12:
