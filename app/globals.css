@@ -432,11 +432,13 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
 .gatesel:focus{outline:0;border-color:var(--forest-light);box-shadow:var(--shadow-sm);}
 .gateback{font-size:12.5px;color:var(--muted);text-decoration:none;margin-top:2px;}
 .gateback:hover{color:var(--forest);text-decoration:underline;}
-/* Wide enough for the card to stand beside him rather than on top of him. */
+/* Wide enough for the card to stand beside him rather than on top of him.
+   Sprout on the left, the form on the right: the eye lands on him first and
+   finishes on the field it has to fill in. */
 @media (min-width:880px){
-  .gatepage{place-items:center start;padding-left:min(13vw,168px);}
-  .sproutbg{background-position:73% 50%;}
-  .sproutbg video{object-position:73% 50%;}
+  .gatepage{place-items:center end;padding-right:min(13vw,168px);}
+  .sproutbg{background-position:27% 50%;}
+  .sproutbg video{object-position:27% 50%;}
 }
 
 @media (max-width:880px){
