@@ -6,7 +6,8 @@
  * stored .html with text/plain. Callers hand the browser what this returns; they
  * never build the path themselves.
  */
-export type ArtefactKind = 'studypack-html' | 'studypack-pdf' | 'worksheet' | 'planner';
+export type ArtefactKind =
+  | 'studypack-html' | 'studypack-pdf' | 'worksheet' | 'planner' | 'homework' | 'homework-pdf';
 
 export function viewUrl(kind: ArtefactKind, id: string): string {
   return `/api/document/view?kind=${kind}&id=${encodeURIComponent(id)}`;

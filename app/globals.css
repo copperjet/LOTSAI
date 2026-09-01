@@ -99,6 +99,9 @@ code{font-family:ui-monospace,'Cascadia Mono',Menlo,monospace;}
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:.12s;}
 .ritem:hover{background:var(--forest-tint);}
 .ritem.on{background:var(--forest);color:#FFFDF8;font-weight:600;}
+/* The thread being written into. Quieter than .on, which is a live agenda item: this
+   is where you are, not something waiting to be done. */
+.ritem.here{background:var(--forest-tint);font-weight:600;}
 .ritem small{display:block;font-size:11.5px;color:var(--muted);font-weight:400;}
 .ritem.on small{color:rgba(255,255,255,.7);}
 .rail .foot{border-top:1px solid var(--line);padding:10px 12px;display:flex;flex-direction:column;gap:9px;}

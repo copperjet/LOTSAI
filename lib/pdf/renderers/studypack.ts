@@ -7,8 +7,19 @@
  *
  * Built on the shared pdf-lib layer (lib/pdf/layout + branding) so it carries the
  * school's identity and the WinAnsi sanitiser every model-written artefact needs.
- * Registered as renderer id 'studypack-pdf' (lib/workflows/registry.ts); its output
- * format is set in lib/pdf/store.ts.
+ * Registered as renderer id 'studypack-pdf-basic' (lib/workflows/registry.ts); its
+ * output format is set in lib/pdf/store.ts.
+ *
+ * TWO CONTENT MODELS. A v1 pack is units -> topics; a v2 pack is pages of blocks
+ * (lib/studypack/schema.ts), and this renderer read `content.units` on both. On a v2
+ * pack that loop iterated nothing and the PDF came out as a header, an info strip and
+ * an empty page - which is what a teacher got from "Download printable PDF" every time
+ * the headless browser could not be started. Both models are drawn now.
+ *
+ * This is deliberately the plain rendering. The designed pack is the browser print of
+ * the pack's own HTML (./studypack_print.ts); this is what stands in when no browser
+ * can be started, so its one duty is to be COMPLETE. Nothing here should grow into a
+ * second design.
  */
 import { admin } from '@/lib/supabase';
 import { rgb, RGB, PDFFont } from 'pdf-lib';
@@ -17,6 +28,8 @@ import {
 } from '@/lib/pdf/layout';
 import { FOREST, GOLD, drawHeader, drawInfoStrip, drawFooterOnAllPages } from '@/lib/pdf/branding';
 import type { PackContent } from '@/lib/studypack';
+import type { PackV2 } from '@/lib/studypack/schema';
+import { renderPackPdfV2 } from './studypack_v2';
 
 const INK = rgb(0.12, 0.12, 0.15);
 const MUTED = rgb(0.42, 0.42, 0.47);
@@ -29,6 +42,14 @@ export async function renderStudyPackPdf(studyPackId: string): Promise<Uint8Arra
   const { data: pack } = await db.from('study_pack')
     .select('content, subject_id, year_group, week_from, week_to').eq('id', studyPackId).single();
   if (!pack) throw new Error(`No study pack ${studyPackId}`);
+
+  const meta = {
+    subject: pack.subject_id ?? '-', yearGroup: pack.year_group ?? '-',
+    weeks: `${pack.week_from}-${pack.week_to}`,
+  };
+  if (Number((pack.content as { version?: unknown })?.version) === 2) {
+    return renderPackPdfV2(pack.content as PackV2, meta);
+  }
 
   const content = pack.content as PackContent;
   const title = `Study Pack - ${content.title ?? 'Revision'}`;

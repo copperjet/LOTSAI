@@ -34,6 +34,8 @@ const KIND: Record<string, { workflow: string; renderer: string; table: string |
   'studypack-pdf':  { workflow: 'study_pack',     renderer: 'studypack-pdf', table: null },
   worksheet:        { workflow: 'worksheet',      renderer: 'worksheet',     table: 'worksheet' },
   planner:          { workflow: 'weekly_planner', renderer: 'planner',       table: null },
+  homework:         { workflow: 'homework',       renderer: 'homework',      table: 'homework' },
+  'homework-pdf':   { workflow: 'homework',       renderer: 'homework-pdf',  table: null },
 };
 
 export async function GET(req: NextRequest) {

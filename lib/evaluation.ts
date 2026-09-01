@@ -1,5 +1,34 @@
 import { call } from './claude';
+import { admin } from './supabase';
 import type { Objective } from './planner';
+
+/**
+ * How far back an unevaluated lesson still counts as outstanding.
+ *
+ * A backlog with no floor is not a to-do list. /api/agenda counted every lesson the
+ * teacher had ever taught with no note against it, so a term of history sat on the
+ * home screen as "Overdue" and no amount of evaluating could clear it - the count went
+ * down by one and the banner stayed. A note written six weeks after the lesson is not
+ * worth having anyway: the point of evaluation is next week's plan.
+ *
+ * The window is this school week and the last one. Older lessons are lapsed, not late.
+ * Both /api/agenda and /api/evaluate ask this, so the count and the queue cannot
+ * disagree - they used to, one being unbounded and the other capped at twelve.
+ */
+export async function evaluationWindowStart(today: string): Promise<string> {
+  const fortnight = new Date(`${today}T00:00:00Z`);
+  fortnight.setUTCDate(fortnight.getUTCDate() - 14);
+  const fallback = fortnight.toISOString().slice(0, 10);
+
+  // The school's own weeks where they are known: a Monday is a cleaner boundary than
+  // "fourteen days ago", and a break week should not shorten the window.
+  const { data } = await admin().from('school_week')
+    .select('week_commencing').lte('week_commencing', today)
+    .order('week_commencing', { ascending: false }).limit(2);
+
+  const weeks = (data ?? []) as { week_commencing: string }[];
+  return weeks[1]?.week_commencing ?? weeks[0]?.week_commencing ?? fallback;
+}
 
 /**
  * Lesson Evaluation (main spec section 6.2) — the adoption engine.

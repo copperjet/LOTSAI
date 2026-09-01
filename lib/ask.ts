@@ -16,9 +16,22 @@
  *               usually structured. The UI marks these as not from the school's
  *               records, because a teacher has to be able to tell the school's
  *               own answer from a general one.
- *   open_ended  writing, brainstorming, research. Still the boundary: main spec
- *               section 1's four tests, and Addendum D section D5.1 on
- *               expectation creep.
+ *   open_ended  a request to MAKE something - writing, brainstorming, research, and
+ *               anything the workflows build. Two failures came out of this one being
+ *               drawn too narrowly: asked to "create a homework", the model classified
+ *               it as `records`, wrote the entire paper into the chat as prose, and
+ *               presented it with no "not from the school's records" note, as though a
+ *               homework were something the calendar held. Told next to "put it on a
+ *               document", the router had no homework workflow to reach and answered
+ *               with the boundary card - refusing the one half of the exchange this
+ *               product exists for.
+ *
+ *               Both are fixed at once: app/page.tsx routes a request to make
+ *               teaching material to the workflow that builds it (lib/homework.ts is
+ *               the newest), and anything that still arrives here is classified by
+ *               what is being asked for rather than by whether the records could
+ *               ground it. Still the boundary: main spec section 1's four tests, and
+ *               Addendum D section D5.1 on expectation creep.
  *
  * The grounding comes from the tables /api/calendar already reads, at the scale
  * app/api/search/route.ts already reasons about: one academic year is tens of
@@ -55,8 +68,18 @@ structured, what differentiation is. Answer it, but state nothing specific to Lu
 School - no dates, no timetable, no policy, no staff. If answering would need you to invent
 something about this school, it is not this kind.
 
-"open_ended" - the teacher is asking for open-ended work rather than a fact: writing, research,
-brainstorming, general drafting. Leave "answer" empty; the application says its own piece.
+"open_ended" - the teacher is asking you to MAKE something rather than to tell them something:
+homework, a worksheet, a study pack, a lesson plan, a test, a letter, a display, or any other piece
+of writing, research or drafting. Leave "answer" empty; the application says its own piece.
+
+This one matters most, so read it twice. A request to produce teaching material is never "records"
+and never "general", however much of it the records could ground - not "write a homework on factors
+and multiples", not "give me five questions on this week's topic", not "draft a note to parents".
+Asked to create a homework, you once wrote the whole paper into the chat as though it were a fact
+about this school, and the teacher then had a homework in a chat window and no document. The
+application has workflows that build these properly, and it can only route to them if you say what
+kind of request this is. Telling a teacher what week 5 covers is "records"; writing the homework for
+week 5 is "open_ended".
 
 Answer in two or three sentences, in plain British English, in the register a colleague would use.
 Give the specific fact asked for rather than describing where to find it. Never use an em dash or

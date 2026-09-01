@@ -8,6 +8,9 @@
  */
 import { writeFileSync } from 'node:fs';
 import { renderPackHtml, footerTemplate } from '../lib/studypack/render_html';
+import { renderPackPdfV2 } from '../lib/pdf/renderers/studypack_v2';
+import { homeworkPack } from '../lib/homework/render_html';
+import type { HomeworkContent } from '../lib/homework';
 import type { PackV2 } from '../lib/studypack/schema';
 
 const pack: PackV2 = {
@@ -139,8 +142,97 @@ const pack: PackV2 = {
   ],
 };
 
+/**
+ * `--stress` pads the pack until it cannot fit its own pages: thirty-three objectives,
+ * so the cover has to set them in columns, and a section carrying a full drill plus a
+ * grid of notes, so the paginator has something real to split. A pack that fits proves
+ * nothing about either.
+ */
+if (process.argv.includes('--stress')) {
+  for (let i = pack.objectives.length; i < 33; i++) {
+    pack.objectives.push({
+      ref: `4Rv.${String(i).padStart(2, '0')}`,
+      text: 'Comment on the impact of figurative language in texts, including alliteration and similes.',
+      source: 'registry',
+    });
+  }
+  pack.objective_refs = pack.objectives.map(o => o.ref).filter((r): r is string => !!r);
+  pack.pages.push({
+    id: 'stress', eyebrow: 'WEEK 10', title: 'Non-fiction, discussion and punctuation',
+    objective_indexes: [0, 1, 2, 3, 4, 5, 6, 7, 8], accent: 'gold',
+    blocks: [
+      { type: 'key_notes', columns: 3, cards: Array.from({ length: 6 }, (_, i) => ({
+        heading: `Card ${i + 1}`,
+        body: 'Non-fiction gives real information. It may be a report, explanation, instructions or a letter, and its punctuation carries the meaning.',
+      })) },
+      { type: 'practice', intro: 'Answer in full sentences where you can.', columns: 2,
+        questions: Array.from({ length: 10 }, (_, i) => ({
+          text: `Explain how commas, verbs and voice can help a listener understand meaning (${i + 1}).`,
+          marks: 6, answer_lines: 5,
+        })) },
+    ],
+  });
+}
+
+/**
+ * `--homework` renders a homework instead: the same document, composed from the
+ * homework content model (lib/homework/render_html.ts). It is here rather than in its
+ * own harness because it is the same renderer, and a change to the pack's page is a
+ * change to the homework's.
+ */
+const HOMEWORK: HomeworkContent = {
+  title: 'Factors and multiples',
+  intro: 'Work on your own. Show your working where a question asks for it.',
+  duration_minutes: 45,
+  teacher_note: 'If a learner cannot get started, reduce section 2 to the first two factor pairs.',
+  objective_refs: ['4Nc.03', '4Nc.04'],
+  sections: [
+    {
+      heading: 'Quick check', instructions: 'Answer these from memory.',
+      objectives: [{ ref: '4Nc.03', text: 'Recognise multiples of 2, 5 and 10.' }],
+      questions: [
+        { text: 'Write the multiples of 4 up to 40.', marks: 3, answer_lines: 2, answer: '4, 8, 12, 16, 20, 24, 28, 32, 36, 40' },
+        { text: 'Write the first six multiples of 6.', marks: 2, answer_lines: 2, answer: '6, 12, 18, 24, 30, 36' },
+      ],
+    },
+    {
+      heading: 'Factors', instructions: 'Use a factor pair table if it helps.',
+      objectives: [{ ref: '4Nc.04', text: 'Understand factors and factor pairs of whole numbers.' }],
+      questions: [
+        { text: 'Find all the factors of 12, 18 and 24.', marks: 6, answer_lines: 4, answer: '12: 1,2,3,4,6,12. 18: 1,2,3,6,9,18. 24: 1,2,3,4,6,8,12,24' },
+        { text: 'Circle the common factors of 18 and 24.', marks: 4, answer_lines: 2, answer: '1, 2, 3, 6' },
+        { text: 'Complete the factor pairs of 20 and of 30.', marks: 6, answer_lines: 5, answer: '20: 1x20, 2x10, 4x5. 30: 1x30, 2x15, 3x10, 5x6' },
+      ],
+    },
+    {
+      heading: 'Reasoning', instructions: 'Answer in full sentences.',
+      objectives: [{ ref: '4Nc.03', text: 'Recognise multiples of 2, 5 and 10.' }],
+      questions: [
+        { text: 'A number is a multiple of 6 and is less than 40. List all the possible numbers.', marks: 5, answer_lines: 4, answer: '6, 12, 18, 24, 30, 36' },
+        { text: 'Explain how you know you have found them all.', marks: 5, answer_lines: 6, answer: 'Counting up in sixes until the next one passes 40.' },
+      ],
+    },
+  ],
+};
+
+if (process.argv.includes('--homework')) {
+  Object.assign(pack, homeworkPack(HOMEWORK, {
+    subject: 'Mathematics', yearGroup: 'CP4', curriculum: '0845', weekNumber: 5,
+  }));
+}
+
 const out = process.argv[2] ?? 'render-check.html';
-const paged = process.argv[3] === '--paged';
+const paged = process.argv.includes('--paged');
 writeFileSync(out, renderPackHtml(pack, { paged }), 'utf-8');
 if (paged) writeFileSync(out + '.footer.html', footerTemplate(pack), 'utf-8');
 console.log(`wrote ${out} (${pack.pages.length} pages${paged ? ', paged' : ''})`);
+
+// The plain pdf-lib fallback, from the same pack. It is what a teacher gets when no
+// headless browser can be started, so it is checked from the same harness.
+if (process.argv.includes('--pdf')) {
+  renderPackPdfV2(pack, { subject: pack.meta.subject, yearGroup: pack.meta.yearGroup, weeks: pack.meta.span ?? '-' })
+    .then(bytes => {
+      writeFileSync(out.replace(/\.html$/, '') + '.pdf', bytes);
+      console.log(`wrote ${out.replace(/\.html$/, '')}.pdf (${bytes.length} bytes)`);
+    });
+}

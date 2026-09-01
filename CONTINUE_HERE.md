@@ -24,6 +24,13 @@ Migrations applied through **0010**. **0011 (sign-in) and 0012 (admin views) are
 yet applied** — paste `supabase/migrations/APPLY_0011_0012.sql` into the SQL editor.
 Storage bucket `artefacts` exists (private).
 
+**0015 (saved threads, homework, `study_pack.render_note`) is written and NOT applied.** Until it
+is, three things degrade rather than fail, on purpose:
+- the rail shows no *Recent* list and nothing a teacher says is kept past the tab;
+- "Set homework" runs as far as the picker and then says the database needs 0015;
+- a study pack PDF that fell back to the plain pdf-lib rendering cannot say so.
+Paste `supabase/migrations/0015_threads_homework.sql` into the SQL editor to switch them on.
+
 ## Environment / gotchas (READ FIRST)
 
 - **Real calls**: the Browser preview tool forces `MOCK_LLM=1`. To run real OpenAI, start the

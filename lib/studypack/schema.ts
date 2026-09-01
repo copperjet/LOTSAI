@@ -133,6 +133,14 @@ export type PackLayout = 'a4-landscape' | 'slide-16x9';
 export interface PackV2 {
   version: 2;
   layout: PackLayout;
+  /**
+   * What the document calls itself on its cover and in the browser tab. Study packs
+   * are not the only thing rendered through this template any more - homework is
+   * composed as a pack (lib/homework/render_html.ts) - and a homework whose cover read
+   * "STUDY PACK" is telling a child the wrong thing about the paper in their hand.
+   * Optional, and it defaults to Study Pack, so nothing stored before this changes.
+   */
+  kind?: string;
   title: string;
   subtitle: string | null;
   meta: { subject: string; yearGroup: string; curriculum: string | null; span: string | null };

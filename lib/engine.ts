@@ -61,6 +61,20 @@ const BUILTIN: Record<string, Workflow> = {
       tier: 'standard', render: { format: 'html' },
     },
   },
+  homework: {
+    key: 'homework', name: 'Homework', roles: ['teacher'],
+    collaborative: { work_key: ['artefact_type', 'subject', 'year_group', 'academic_year', 'school_week', 'objective_set'], on_match: ['reuse'] },
+    // Homework is a teaching aid the teacher who set it approves, as a worksheet is -
+    // not a plan a head signs.
+    approval: { submit_to: 'teacher', states: ['draft', 'approved', 'returned'] },
+    render: { on: 'create', to: 'storage', format: 'html' },
+    standard: {
+      key: 'homework', version: 'v1', name: 'Homework',
+      schema: {}, non_negotiables: [],
+      generator_id: 'homework', gate_id: 'homework', renderer_id: 'homework',
+      tier: 'standard', render: { format: 'html' },
+    },
+  },
   worksheet: {
     key: 'worksheet', name: 'Worksheet', roles: ['teacher'],
     collaborative: { work_key: ['artefact_type', 'subject', 'year_group', 'academic_year', 'school_week', 'objective_set'], on_match: ['reuse', 'adapt'] },

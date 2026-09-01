@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { admin, currentUser, NOT_SIGNED_IN } from '@/lib/supabase';
+import { evaluationWindowStart } from '@/lib/evaluation';
 
 export const runtime = 'nodejs';
 
@@ -55,10 +56,13 @@ export async function GET() {
     const { data: classes } = await db.from('klass')
       .select('*, subject:subject_id(name)').eq('teacher_id', user.id);
 
-    // Lessons already taught with no note against them.
+    // Lessons already taught with no note against them, within the window that is
+    // still worth writing one for (lib/evaluation.ts). Unbounded, this was a term of
+    // history that could never be cleared.
+    const since = await evaluationWindowStart(today);
     const { data: taught } = await db.from('lesson_entry')
       .select('id, planner!inner(teacher_id)')
-      .eq('planner.teacher_id', user.id).lte('lesson_date', today);
+      .eq('planner.teacher_id', user.id).lte('lesson_date', today).gte('lesson_date', since);
     const ids = (taught ?? []).map(l => l.id);
     const { data: done } = ids.length
       ? await db.from('evaluation').select('lesson_entry_id').in('lesson_entry_id', ids)

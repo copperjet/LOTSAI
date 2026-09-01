@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { currentUser } from '@/lib/supabase';
+import { admin, currentUser } from '@/lib/supabase';
 import * as engine from '@/lib/engine';
 import { storeArtefact } from '@/lib/pdf/store';
 import { viewUrl } from '@/lib/artefactUrl';
@@ -42,5 +42,23 @@ export async function POST(req: NextRequest) {
   const result = await storeArtefact(std, studyPackId);
   if (!result.ok) return NextResponse.json(result, { status: 500 });
 
-  return NextResponse.json({ ...result, url: viewUrl('studypack-pdf', studyPackId) });
+  return NextResponse.json({
+    ...result, url: viewUrl('studypack-pdf', studyPackId),
+    // Set when the headless browser could not be started and the plain pdf-lib
+    // rendering stood in (lib/pdf/renderers/studypack_print.ts). The teacher is told
+    // which PDF they have rather than left to wonder why it looks nothing like the
+    // pack on screen.
+    plain: await renderNote(studyPackId),
+  });
+}
+
+/** Why this pack's PDF is the plain one, if it is. Null when the browser printed it. */
+async function renderNote(studyPackId: string): Promise<string | null> {
+  try {
+    const { data } = await admin().from('study_pack')
+      .select('render_note').eq('id', studyPackId).single();
+    return (data as { render_note?: string | null } | null)?.render_note ?? null;
+  } catch {
+    return null;   // pre-0015
+  }
 }

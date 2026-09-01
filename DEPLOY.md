@@ -15,6 +15,7 @@ five.
 | Model calls | real. Production has `LLM_PROVIDER=openai` and `OPENAI_API_KEY`, and no `MOCK_LLM`. |
 | Google Drive | mocked, because `GOOGLE_SERVICE_ACCOUNT_JSON` is unset. `driveMocked()` treats a missing credential as mock, so nothing is uploaded and approval still succeeds. |
 | Anthropic credits | not available — the card keeps failing, so the app runs on OpenAI (`LLM_PROVIDER=openai`) |
+| Study pack PDFs | the designed PDF is the pack's own page printed by headless Chromium, which needs roughly 1.7 GB. This plan's function memory cap is below that (`memory: 3009` was rejected — see commit `e66a466`), so production falls back to the plain pdf-lib rendering. It is complete, it just is not the designed page. `study_pack.render_note` records the reason on each pack, and the teacher is told which PDF they have. Raising the plan's memory limit, or setting `memory` on `app/api/studypack/**` to whatever the cap now allows, is what switches the designed one on. |
 
 `lotsai.igaprep.com` was the original target and is **not** part of this project. That domain is not
 in the `copperjets-projects` team and 404s; do not point anything at it.

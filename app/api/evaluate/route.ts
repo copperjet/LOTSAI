@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
-import { formatEvaluation } from '@/lib/evaluation';
+import { evaluationWindowStart, formatEvaluation } from '@/lib/evaluation';
 
 export const runtime = 'nodejs';
 
@@ -17,12 +17,16 @@ export async function GET() {
   const db = admin();
   const user = await currentUser();
 
+  // The same window /api/agenda counts, so the queue and the count agree. They did
+  // not: the agenda counted every taught lesson ever and this offered the last twelve,
+  // so a teacher could be told about work the flow would never hand them.
+  const today = new Date().toISOString().slice(0, 10);
   const { data } = await db.from('lesson_entry')
     .select('id, lesson_date, day_of_week, objectives, methodology, planner!inner(class_id, teacher_id, klass:class_id(name))')
     .eq('planner.teacher_id', user.id)
-    .lte('lesson_date', new Date().toISOString().slice(0, 10))
-    .order('lesson_date', { ascending: false })
-    .limit(12);
+    .lte('lesson_date', today)
+    .gte('lesson_date', await evaluationWindowStart(today))
+    .order('lesson_date', { ascending: true });
 
   const ids = (data ?? []).map(l => l.id);
   const { data: done } = await db.from('evaluation').select('lesson_entry_id').in('lesson_entry_id', ids);

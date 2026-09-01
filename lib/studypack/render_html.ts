@@ -33,10 +33,19 @@ const json = (v: unknown) =>
 
 const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
 
-/** How many objectives the cover lists in full before it says how many more there are.
- *  The GP pack's cover carries three; a span of four weeks can carry a dozen, and a
- *  cover that is a wall of small print is not the page the Reference Guide asks for. */
-const COVER_OBJECTIVES = 8;
+/**
+ * The cover lists every objective. It is the page the Reference Guide asks for, and
+ * every section header points at it - "and 4 more, listed in full on the cover" - so a
+ * cover that stopped at eight and said "and 29 more" broke a promise the document made
+ * on six other pages.
+ *
+ * A long list is set in columns rather than truncated: these two thresholds are density,
+ * not a cap. Only past COVER_MAX - far more objectives than a four week span holds - does
+ * the cover give up, and then it says where the rest actually are.
+ */
+const COVER_COLUMNS = 10;
+const COVER_DENSE = 20;
+const COVER_MAX = 44;
 
 /** How many objectives a section header states before deferring to the cover. A page
  *  the model tagged with all eleven objectives of a four-week span spent a third of
@@ -84,9 +93,18 @@ export function footerTemplate(pack: PackV2): string {
 export function renderPackHtml(pack: PackV2, opts: RenderOpts = {}): string {
   const size = SIZES[pack.layout] ?? SIZES['a4-landscape'];
   const paged = opts.paged === true;
-  // What one printed page can hold, in CSS pixels: the sheet, less the strip at the
-  // foot that the running footer is stamped into. The paginator measures against it.
-  const pagePx = Math.round(((parseFloat(size.h) - (paged ? 10 : 0)) * 96) / 25.4);
+  // How much of the page height a sheet does not get, in millimetres.
+  //
+  // On the server print that is the strip the running footer is stamped into. On the
+  // screen variant the footer is inside the sheet, so the strip is only slack - but it
+  // has to exist: Chrome lays A4 out as 209.98mm, and a sheet asking for the full 210
+  // overran by a fraction of a point and printed a continuation page carrying nothing
+  // but its footer. Five of the fifteen pages of a ten sheet pack were that page.
+  //
+  // The same figure sets the sheet's printed min-height and the height the paginator
+  // measures against, so the two cannot drift apart.
+  const slackMm = paged ? 10 : 4;
+  const pagePx = Math.round(((parseFloat(size.h) - slackMm) * 96) / 25.4);
 
   // Quiz payloads for the on-screen engine, and a continuously numbered answer key
   // for the printed copy - a printed pack must be workable before the answers are seen.
@@ -149,18 +167,18 @@ export function renderPackHtml(pack: PackV2, opts: RenderOpts = {}): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${esc(pack.title)} - LOTS Study Pack</title>
+<title>${esc(pack.title)} - LOTS ${esc(pack.kind ?? 'Study Pack')}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-${css(size, paged)}
+${css(size, paged, slackMm)}
 </style>
 </head>
 <body${paged ? ' class="paged"' : ''}>
 <div class="toolbar no-print">
   <span class="tb-title">${esc(pack.title)}</span>
-  <button onclick="window.print()">Print / Save as PDF</button>
+  <button onclick="__packPrepare();window.print()">Print / Save as PDF</button>
 </div>
 <div class="deck">
 ${coverSheet(pack, total)}
@@ -221,16 +239,18 @@ function coverSheet(pack: PackV2, total: number): string {
   return `<section class="sheet cover accent-forest">
   <div class="cover-body">
     <img class="crest" src="${CREST}" alt="Lusaka Oaktree School">
-    <div class="cover-eyebrow">Lusaka Oaktree School &middot; Study Pack</div>
+    <div class="cover-eyebrow">Lusaka Oaktree School &middot; ${esc(pack.kind ?? 'Study Pack')}</div>
     <h1>${esc(pack.title)}</h1>
     <div class="cover-rule"></div>
     ${pack.subtitle ? `<p class="cover-sub">${esc(pack.subtitle)}</p>` : ''}
     <p class="cover-meta">${esc(meta)}${lines.length ? ` &middot; ${lines.map(esc).join(' &middot; ')}` : ''}</p>
-    ${pack.objectives.length ? `<div class="cover-objectives">
-      ${pack.objectives.slice(0, COVER_OBJECTIVES).map(o =>
+    ${pack.objectives.length ? `<div class="cover-objectives${
+      pack.objectives.length > COVER_COLUMNS ? ' cols' : ''}${
+      pack.objectives.length > COVER_DENSE ? ' dense' : ''}">
+      ${pack.objectives.slice(0, COVER_MAX).map(o =>
         `<p>${o.ref ? `<span class="ref">${esc(o.ref)}</span>` : ''}<span>${esc(o.text)}</span></p>`).join('')}
-      ${pack.objectives.length > COVER_OBJECTIVES
-        ? `<p class="more">and ${pack.objectives.length - COVER_OBJECTIVES} more</p>` : ''}
+      ${pack.objectives.length > COVER_MAX
+        ? `<p class="more">and ${pack.objectives.length - COVER_MAX} more, stated on the pages that cover them</p>` : ''}
     </div>` : ''}
   </div>
   <div class="cover-foot">1/${total}</div>
@@ -478,7 +498,8 @@ function chartSvg(b: Extract<Block, { type: 'chart' }>): string {
 
 // ----------------------------------------------------------------------- css
 
-function css(size: { css: string; w: string; h: string; px: string; py: string }, paged: boolean): string {
+function css(size: { css: string; w: string; h: string; px: string; py: string },
+             paged: boolean, slackMm: number): string {
   return `
 :root{
   --forest:#1D5829; --forest-dark:#103C19; --forest-light:#31773F; --gold:#E3A73B; --gold-dark:#B8860B;
@@ -546,6 +567,7 @@ body{font-family:var(--font-body);color:var(--ink);background:#EEF1E8;line-heigh
 .cover::after{content:"";position:absolute;right:-14%;top:-32%;width:62%;aspect-ratio:1;
   border-radius:50%;background:rgba(255,255,255,.045);}
 .cover-body{position:relative;z-index:1;max-width:72%;}
+.cover-body:has(.cover-objectives.cols){max-width:92%;}
 .cover .crest{width:74px;height:74px;border-radius:50%;background:#fff;padding:4px;
   display:block;margin-bottom:16px;}
 .cover-eyebrow{font-size:11px;font-weight:700;letter-spacing:.19em;text-transform:uppercase;
@@ -555,6 +577,12 @@ body{font-family:var(--font-body);color:var(--ink);background:#EEF1E8;line-heigh
 .cover-sub{margin:0 0 4px;font-size:16px;color:rgba(255,255,255,.9);}
 .cover-meta{margin:0;font-size:13px;font-weight:600;color:rgba(255,255,255,.82);}
 .cover-objectives{margin-top:18px;display:flex;flex-direction:column;gap:5px;}
+/* A four week span can carry thirty objectives, and they all belong here - every
+   section header says so. Past ten they run in two columns, past twenty they run
+   smaller as well, and the panel takes the width it needs to hold them. */
+.cover-objectives.cols{display:block;columns:2;column-gap:20px;}
+.cover-objectives.cols p{break-inside:avoid;margin-bottom:4px;}
+.cover-objectives.dense p{font-size:9.5px;line-height:1.3;margin-bottom:2px;}
 .cover-objectives p{margin:0;font-size:11.5px;color:rgba(255,255,255,.88);}
 .cover-objectives .ref{font-weight:700;color:var(--gold);margin-right:8px;}
 .cover-objectives .more{color:rgba(255,255,255,.6);font-style:italic;}
@@ -694,33 +722,52 @@ tbody tr:nth-child(even) td{background:#F8FAF5;}
 .flash-back{background:#fff;border:2px solid var(--accent);transform:rotateY(180deg);font-size:10px;}
 
 @media print{
-  /* Server print leaves a strip at the foot of every page for the running footer
-     Chrome stamps there; the document keeps its own footer otherwise. */
-  /* The strip is the running footer's, and it is taken out of the page, so a sheet
-     designed against the full page height would spill into it and print a headless
-     continuation page. It is kept to what a 7.5pt footer needs, and the sheet gives
-     its own bottom padding back below - the stamped footer stands in for it - so the
-     printed sheet has at least as much room for content as the screen one shows. */
-  @page{size:${size.css};margin:${paged ? '0 0 10mm' : '0'};}
-  ${paged ? '.paged .sheet{padding-bottom:1mm;}' : ''}
-  body{background:#fff;}
-  .no-print{display:none!important;}
-  .print-only{display:block!important;}
-  .sheet.print-only{display:flex!important;}
-  .grid.print-only{display:grid!important;}
-  .deck{padding:0;gap:0;}
+  @page{size:${size.css};margin:${paged ? `0 0 ${slackMm}mm` : '0'};}
+${printRules(size, paged, slackMm, '  ')}
+}
+/* The same rules again, on screen, under a class the paginator puts on <html> while
+   it measures.
+
+   The paginator has to know how tall a sheet really is on paper, and a sheet measured
+   against the screen stylesheet is a different sheet: it is fluid rather than 297mm
+   wide, its answer key and its printed quiz lists are display:none, and the two do not
+   split in the same place. The server print gets this for free by emulating print
+   media before it measures; a teacher pressing Ctrl+P cannot, so the document puts
+   the print geometry on itself for the length of the measurement instead. */
+${printRules(size, paged, slackMm, '.measuring ')}
+.measuring .sheet{width:${size.w};max-width:${size.w};}
+.measuring .toolbar{display:none!important;}`;
+}
+
+/**
+ * Everything the printed page changes about the screen one.
+ *
+ * Emitted twice - inside `@media print`, and behind `.measuring` for the pass the
+ * paginator makes before a browser print. Anything that only makes sense to a printer,
+ * `@page` above, stays out of here.
+ */
+function printRules(size: { css: string; w: string; h: string; px: string; py: string },
+                    paged: boolean, slackMm: number, at: string): string {
+  const p = (sel: string) => sel.split(',').map(x => `${at}${x.trim()}`).join(',');
+  return `
+  ${p('body')}{background:#fff;}
+  ${p('.no-print')}{display:none!important;}
+  ${p('.print-only')}{display:block!important;}
+  ${p('.sheet.print-only')}{display:flex!important;}
+  ${p('.grid.print-only')}{display:grid!important;}
+  ${p('.deck')}{padding:0;gap:0;}
   /* A hair under the page, not exactly it: Chrome lays A4 out as 594.96pt, which is
      209.98mm, so a sheet asking for a full 210mm overflowed by a third of a point and
      pushed its footer onto a blank continuation page. In the paged variant the sheet
      takes its natural height instead - a section longer than one page runs on to the
      next, with the stamped footer on both. Content is never clipped either way:
      losing a question silently would be far worse than an extra page. */
-  .sheet{box-shadow:none;break-after:page;page-break-after:always;width:100%;max-width:none;
+  ${p('.sheet')}{box-shadow:none;break-after:page;page-break-after:always;width:100%;max-width:none;
     /* overflow:hidden is what rounds the accent bar on screen; in print it would
        clip the very content the spill exists to preserve. */
     overflow:visible;
-    ${paged ? '' : `min-height:calc(${size.h} - 2mm);`}}
-  .paged .head-page,.paged .cover-foot{display:none;}
+    ${paged ? 'padding-bottom:1mm;' : `min-height:calc(${size.h} - ${slackMm}mm);`}}
+  ${paged ? `${p('.paged .head-page')},${p('.paged .cover-foot')}{display:none;}` : ''}
   /* Every other sheet may take its natural height in the paged variant; the cover
      is a full-page panel and a half-painted one looks like a printing fault.
      It also keeps clipping its decoration, unlike every other sheet: the circle
@@ -728,13 +775,12 @@ tbody tr:nth-child(even) td{background:#F8FAF5;}
      to 338mm. Chrome then scaled the whole document by 297/338 to fit the paper, so
      every millimetre in this stylesheet printed 12 per cent short and the panel
      covered seven eighths of the page. Nothing but decoration is outside the box. */
-  .sheet.cover{min-height:calc(${size.h} - ${paged ? '10mm' : '2mm'});overflow:hidden;}
+  ${p('.sheet.cover')}{min-height:calc(${size.h} - ${slackMm}mm);overflow:hidden;}
   /* Without a fixed sheet height there is nothing to stretch into, and a stretched
      body leaves a page of white between the last block and the page break. */
-  .paged .sheet-body{flex:none;}
-  .sheet:last-child{break-after:auto;page-break-after:auto;}
-  .block,.note-card,.worked,.source,.res-group,.row{break-inside:avoid;}
-}`;
+  ${paged ? `${p('.paged .sheet-body')}{flex:none;}` : ''}
+  ${p('.sheet:last-child')}{break-after:auto;page-break-after:auto;}
+  ${p('.block')},${p('.note-card')},${p('.worked')},${p('.source')},${p('.res-group')},${p('.row')}{break-inside:avoid;}`;
 }
 
 // -------------------------------------------------------------------- engine
@@ -757,22 +803,33 @@ function engine(): string {
  */
 window.__packPaginate=function(pagePx){
   var deck=document.querySelector('.deck'); if(!deck||!pagePx) return 0;
+  // Splitting a document that has already been split would cut it again at the new
+  // sheet boundaries. One pass per document, whoever asks for it.
+  if(window.__packPrepared) return 0;
+  window.__packPrepared=true;
   var made=0,guard=0;
+  var over=function(el){return el.getBoundingClientRect().height>pagePx+2;};
   var queue=[].slice.call(deck.querySelectorAll('.sheet'));
   while(queue.length&&guard++<300){
     var sheet=queue.shift();
     if(sheet.classList.contains('cover')) continue;
     var body=sheet.querySelector('.sheet-body');
-    if(!body||body.children.length<2) continue;                 // one block that will
-    if(sheet.getBoundingClientRect().height<=pagePx+2) continue; // not fit: let it spill
+    if(!body||!body.children.length) continue;
+    if(!over(sheet)) continue;
     var next=sheet.cloneNode(true);
     var nextBody=next.querySelector('.sheet-body');
     while(nextBody.firstChild) nextBody.removeChild(nextBody.firstChild);
     var h2=next.querySelector('.sheet-head h2');
     if(h2&&h2.textContent.indexOf('(continued)')<0) h2.textContent=h2.textContent+' (continued)';
-    while(sheet.getBoundingClientRect().height>pagePx+2&&body.children.length>1){
+    while(over(sheet)&&body.children.length>1){
       nextBody.insertBefore(body.lastElementChild,nextBody.firstChild);
     }
+    // A single block taller than the page. Moving whole blocks cannot help here, and
+    // leaving it spilled is what printed a sheet carrying four questions and a footer:
+    // a ten question drill with five ruled lines each is half a page longer than the
+    // page. So the list inside it is split instead, and its numbering carried across.
+    if(over(sheet)) splitList(sheet,body,nextBody,pagePx);
+    if(!nextBody.children.length) continue;   // nothing could be moved: let it spill
     sheet.parentNode.insertBefore(next,sheet.nextSibling);
     made++;
     queue.unshift(next);   // a continuation sheet can overflow in its turn
@@ -785,6 +842,52 @@ window.__packPaginate=function(pagePx){
   }
   return made;
 };
+
+/**
+ * Split the document before a browser print, the way the server print does.
+ *
+ * The pack's own toolbar button and Ctrl+P both come through here. Without it nothing
+ * ran the paginator on the teacher's own machine: a ten sheet pack printed as fifteen
+ * pages, five of them carrying a footer and nothing else, and the headers still read
+ * "3/10". The server print (lib/pdf/renderers/studypack_print.ts) emulates print media
+ * and calls __packPaginate directly; here the print geometry is put on the document
+ * for the length of the measurement instead, which is what the .measuring class is.
+ */
+window.__packPrepare=function(){
+  if(window.__packPrepared) return 0;
+  var root=document.documentElement;
+  root.classList.add('measuring');
+  try{ return window.__packPaginate(window.__packPagePx); }
+  finally{ root.classList.remove('measuring'); }
+};
+window.addEventListener('beforeprint',function(){window.__packPrepare();});
+
+/**
+ * Move the tail of a block's list onto the continuation sheet.
+ *
+ * The last resort of the paginator, for the one block that is taller than a page on
+ * its own. The block is cloned without its title and lede - the sheet header already
+ * says "(continued)" - and its trailing list items are moved across one at a time
+ * until the sheet fits. The list numbers itself with a CSS counter, so the clone is
+ * told where to start or a continued drill would number itself 1 again.
+ */
+function splitList(sheet,body,nextBody,pagePx){
+  var block=body.lastElementChild; if(!block) return;
+  var list=block.querySelector('ol,ul'); if(!list||list.children.length<2) return;
+  var start=0,m=/counter-reset:\s*q\s+(-?\d+)/.exec(list.getAttribute('style')||'');
+  if(m) start=parseInt(m[1],10);
+  var clone=block.cloneNode(true);
+  var cloneList=clone.querySelector('ol,ul');
+  while(cloneList.firstChild) cloneList.removeChild(cloneList.firstChild);
+  var title=clone.querySelector('.block-title'); if(title) title.parentNode.removeChild(title);
+  var lede=clone.querySelector('.lede'); if(lede) lede.parentNode.removeChild(lede);
+  nextBody.insertBefore(clone,nextBody.firstChild);
+  while(sheet.getBoundingClientRect().height>pagePx+2&&list.children.length>1){
+    cloneList.insertBefore(list.lastElementChild,cloneList.firstChild);
+  }
+  if(!cloneList.children.length){ nextBody.removeChild(clone); return; }
+  cloneList.style.counterReset='q '+(start+list.children.length);
+}
 
 function initQuiz(id,questions){var el=document.getElementById(id);if(!el)return;
 el.innerHTML='<div class="quiz-score">Score: 0 / '+questions.length+'</div>'+questions.map(function(q,qi){

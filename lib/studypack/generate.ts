@@ -420,7 +420,12 @@ function urlsIn(text: string): Set<string> {
 function unnumber(text: string): string {
   return String(text ?? '')
     .replace(/^\s*\[\d{1,2}(?:,\s*\d{1,2})*\]\s*/, '')
-    .replace(/^\s*\d{1,2}\s*[.)]\s+/, '')
+    // A bare list too. Card headings came back as "16. Non-fiction texts" and
+    // "22, 23, 24, 25. Words and commas" - the objective numbers the model was given
+    // to tag the page with, written into the title of the card instead. This form is
+    // only stripped from labels (headings, column titles, source labels), never from
+    // prose, where "2, 3, 5. These are the primes" is a sentence.
+    .replace(/^\s*\d{1,2}(?:\s*,\s*\d{1,2})*\s*[.)]\s+/, '')
     .trim();
 }
 
@@ -654,36 +659,97 @@ function settleSpans(blocks: Block[]): Block[] {
 }
 
 
-/** Strip the model's own objective tagging out of a block, and drop what is left empty. */
+/**
+ * Strip the model's own objective tagging out of a block, and drop what is left empty.
+ *
+ * Every text-bearing field is cleaned, nested ones included. Cleaning only the block's
+ * own top-level strings left the tagging inside the arrays: a worked example asked
+ * "Q: Objectives [1] [5] [6] [7] [8] [9] [10]. Plan a short talk for Year 4 about your
+ * favourite playground game." - which is the question a nine year old was then set.
+ *
+ * The block is walked as a plain record rather than through the union: the fields are
+ * named the same across block types, and seventeen narrowed branches would say the
+ * same thing seventeen times.
+ */
 function deIndex<T extends Block>(b: T): T {
-  let out: T = b;
-  if ('intro' in out && typeof out.intro === 'string') {
-    out = { ...out, intro: stripTags(out.intro) || null };
-  }
+  const o = { ...(b as unknown as Record<string, unknown>) };
+  const one = (v: unknown) => stripTags(String(v ?? ''));
+  const label = (v: unknown) => unnumber(stripTags(String(v ?? '')));
+  const many = (v: unknown) =>
+    Array.isArray(v) ? v.map(one).filter(Boolean) : v;
+
+  if (typeof o.intro === 'string') o.intro = one(o.intro) || null;
+  if (typeof o.body === 'string') o.body = one(o.body);
+  if (typeof o.heading === 'string') o.heading = one(o.heading);
+  if (typeof o.question === 'string') o.question = one(o.question);
+  if (typeof o.prompt === 'string') o.prompt = one(o.prompt);
+  if (typeof o.note === 'string') o.note = one(o.note);
+
   // A key notes card headed "Objectives" whose body was nothing but tags -
   // "[10] Monochromatic painting [11] Colour theory" - is a tagging note to itself,
   // not a note to a pupil, so it goes rather than printing empty.
-  if ('cards' in out && Array.isArray(out.cards)) {
-    const cards = out.cards
-      .map(c => ({ ...c, heading: stripTags(String(c.heading ?? "")), body: stripTags(String(c.body ?? "")) }))
-      .filter(c => c.body.length > 2);
-    out = { ...out, cards };
+  if (Array.isArray(o.cards)) {
+    o.cards = (o.cards as Record<string, unknown>[])
+      .map(c => ({ ...c, heading: label(c?.heading), body: one(c?.body) }))
+      .filter(c => String(c.body).length > 2);
   }
-  if ('body' in out && typeof out.body === 'string') {
-    out = { ...out, body: stripTags(out.body) };
+  if (Array.isArray(o.examples)) {
+    o.examples = (o.examples as Record<string, unknown>[]).map(e => ({
+      ...e, prompt: one(e?.prompt), steps: many(e?.steps), answer: one(e?.answer),
+    }));
   }
-  // The open questions carry it too: a think block asked "Objectives [4] and [5]: Where
-  // might you notice diffusion?" - the tagging read as part of the question.
-  if ('heading' in out && typeof out.heading === 'string') {
-    out = { ...out, heading: stripTags(out.heading) };
+  // practice questions carry `text`; quiz questions carry `q` and their options.
+  if (Array.isArray(o.questions)) {
+    o.questions = (o.questions as Record<string, unknown>[]).map(q => ({
+      ...q,
+      ...(typeof q?.text === 'string' ? { text: one(q.text) } : {}),
+      ...(typeof q?.q === 'string' ? { q: one(q.q) } : {}),
+      ...(Array.isArray(q?.options) ? { options: many(q.options) } : {}),
+      ...(typeof q?.explain === 'string' ? { explain: one(q.explain) } : {}),
+    }));
   }
-  if ('question' in out && typeof out.question === 'string') {
-    out = { ...out, question: stripTags(out.question) };
+  if (Array.isArray(o.terms)) {
+    o.terms = (o.terms as Record<string, unknown>[])
+      .map(t => ({ ...t, term: label(t?.term), definition: one(t?.definition) }));
   }
-  if ('prompt' in out && typeof out.prompt === 'string') {
-    out = { ...out, prompt: stripTags(out.prompt) };
+  // `columns` is a count on key_notes and practice, and a list on checklist.
+  if (Array.isArray(o.columns)) {
+    o.columns = (o.columns as Record<string, unknown>[]).map(c => ({
+      ...c, heading: label(c?.heading),
+      ...(typeof c?.blurb === 'string' ? { blurb: one(c.blurb) } : {}),
+      items: many(c?.items),
+    }));
   }
-  return out;
+  if (Array.isArray(o.sources)) {
+    o.sources = (o.sources as Record<string, unknown>[]).map(s => ({
+      ...s, label: label(s?.label), text: one(s?.text), quick_check: one(s?.quick_check),
+    }));
+  }
+  if (Array.isArray(o.rows)) {
+    o.rows = (o.rows as Record<string, unknown>[])
+      .map(r => ({ ...r, cells: many(r?.cells) }));
+  }
+  if (Array.isArray(o.items)) o.items = many(o.items);
+  if (Array.isArray(o.tips)) o.tips = many(o.tips);
+  if (Array.isArray(o.self_check)) o.self_check = many(o.self_check);
+  if (Array.isArray(o.aside_items)) o.aside_items = many(o.aside_items);
+  if (Array.isArray(o.groups)) {
+    o.groups = (o.groups as Record<string, unknown>[]).map(g => ({
+      ...g, label: label(g?.label),
+      ...(Array.isArray(g?.items) ? { items: (g.items as Record<string, unknown>[])
+        .map(i => ({ ...i, name: label(i?.name), why: one(i?.why) })) } : {}),
+    }));
+  }
+  if (o.left && typeof o.left === 'object') {
+    const l = o.left as Record<string, unknown>;
+    o.left = { ...l, heading: label(l.heading), body: one(l.body) };
+  }
+  if (o.right && typeof o.right === 'object') {
+    const r = o.right as Record<string, unknown>;
+    o.right = { ...r, heading: label(r.heading), body: one(r.body) };
+  }
+
+  return o as unknown as T;
 }
 
 /**
@@ -697,15 +763,23 @@ function deIndex<T extends Block>(b: T): T {
 function stripTags(text: string): string {
   return String(text ?? "")
     .replace(/\[\d{1,2}\]/g, "")
-    // The word that introduced them goes with them - "Objectives [4] and [5]: Where
-    // might you notice diffusion?" - but only when a colon or dash shows it was a
-    // label. "Objectives are what a pack is for" is a sentence, and stays one.
-    .replace(/^\s*Objectives?\b[\s,]*(?:and[\s,]*)*[:\-–—]\s*/i, "")
     .replace(/\s{2,}/g, " ")
     // A tag taken out of the middle leaves its space behind: "Explain diffusion ."
     .replace(/\s+([.,;:?!])/g, "$1")
-    // Bracketless too: one pack introduced its practice questions with the bare
-    // list "0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16".
+    // The word that introduced them goes with them - "Objectives [4] and [5]: Where
+    // might you notice diffusion?" - but only when a colon, dash or full stop shows it
+    // was a label. "Objectives are what a pack is for" is a sentence, and stays one.
+    //
+    // The label is not always bare, and the numbers are not always in brackets: packs
+    // came back introducing a drill with "Page objectives: 16, 17, 18, 19, 21, 22, 23,
+    // 24, 25. Answer in full sentences where you can." Everything up to and including
+    // the list goes; the instruction after it is the teacher's and stays.
+    .replace(
+      /^\s*(?:page|this page(?:'s)?|the following)?\s*objectives?\b[\s,]*(?:and[\s,]*)*[:\-\u2013\u2014.]\s*(?:\d{1,2}(?:\s*,\s*\d{1,2})*\s*[.)]?\s*)?/i,
+      "",
+    )
+    // Bracketless and label-less too: one pack introduced its practice questions with
+    // the bare list "0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16".
     .replace(/^[\d,\s]+$/, "")
     .trim();
 }

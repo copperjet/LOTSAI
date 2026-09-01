@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "ES2022"
+    ],
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "noEmit": false,
+    "outDir": ".render-check",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
+  },
+  "include": [
+    "scripts/render_check.ts",
+    "lib/studypack/render_html.ts",
+    "lib/studypack/schema.ts",
+    "lib/crest.ts",
+    "lib/pdf/renderers/studypack_v2.ts",
+    "lib/pdf/layout.ts",
+    "lib/pdf/branding.ts",
+    "lib/homework/render_html.ts"
+  ]
+}

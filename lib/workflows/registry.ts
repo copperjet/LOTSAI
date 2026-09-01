@@ -22,6 +22,8 @@ import { generateStudyPackV2, type GeneratePackV2Input } from '@/lib/studypack/g
 import { gateStudyPackV2 } from '@/lib/studypack/gate';
 import { generateWorksheet, gateWorksheet, type GenerateWorksheetInput } from '@/lib/worksheet';
 import { renderWorksheet } from '@/lib/pdf/renderers/worksheet';
+import { generateHomework, gateHomework, type GenerateHomeworkInput } from '@/lib/homework';
+import { renderHomework, renderHomeworkPdf } from '@/lib/homework/render';
 
 /** A generator turns assembled grounding into artefact content. The input and the
  *  output are the workflow's own; the engine passes them through, only requiring a
@@ -40,6 +42,7 @@ export const GENERATORS: Record<string, Generator> = {
   planner: (input, userId) => generatePlan(input as GenerateInput, userId),
   studypack: (input, userId) => generateStudyPackV2(input as GeneratePackV2Input, userId),
   worksheet: (input, userId) => generateWorksheet(input as GenerateWorksheetInput, userId),
+  homework: (input, userId) => generateHomework(input as GenerateHomeworkInput, userId),
 };
 
 export const GATES: Record<string, GateFn> = {
@@ -48,6 +51,7 @@ export const GATES: Record<string, GateFn> = {
   // Dispatches on content_version, so a v1 pack still gets the v1 gate.
   studypack: (studyPackId) => gateStudyPackV2(studyPackId),
   worksheet: (worksheetId) => gateWorksheet(worksheetId),
+  homework: (homeworkId) => gateHomework(homeworkId),
 };
 
 export const RENDERERS: Record<string, Renderer> = {
@@ -58,4 +62,8 @@ export const RENDERERS: Record<string, Renderer> = {
   'studypack-pdf': (studyPackId) => renderStudyPackPrint(studyPackId),
   'studypack-pdf-basic': (studyPackId) => renderStudyPackPdf(studyPackId),
   worksheet: (worksheetId) => renderWorksheet(worksheetId),
+  // Homework is the study pack's document with homework in it, so it has the pack's
+  // pair: the HTML a teacher opens, and the browser print of it that goes to Drive.
+  homework: (homeworkId) => renderHomework(homeworkId),
+  'homework-pdf': (homeworkId) => renderHomeworkPdf(homeworkId),
 };
