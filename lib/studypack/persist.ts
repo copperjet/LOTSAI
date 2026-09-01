@@ -61,6 +61,9 @@ export function packSummary(content: PackV2) {
       .filter(p => p.objective_indexes.length)
       .map(p => ({ label: p.title, topics: p.blocks.length })),
     refs: content.objective_refs,
+    // The objectives themselves, not only their codes: the card that reports what
+    // was built says what it covers in the curriculum's own words.
+    objectives: (content.objectives ?? []).map(o => ({ ref: o.ref, text: o.text })),
     glossary: content.pages.flatMap(p => p.blocks)
       .filter(b => b.type === 'glossary')
       .reduce((n, b) => n + (b.type === 'glossary' ? b.terms.length : 0), 0),

@@ -105,6 +105,9 @@ code{font-family:ui-monospace,'Cascadia Mono',Menlo,monospace;}
 .ritem small{display:block;font-size:11.5px;color:var(--muted);font-weight:400;}
 .ritem.on small{color:rgba(255,255,255,.7);}
 .rail .foot{border-top:1px solid var(--line);padding:10px 12px;display:flex;flex-direction:column;gap:9px;}
+.adminlink{display:block;font-size:12.5px;font-weight:600;color:var(--muted);text-decoration:none;
+  padding:6px 8px;border-radius:10px;margin-bottom:2px;}
+.adminlink:hover{background:var(--forest-tint);color:var(--forest);}
 .acct{display:flex;align-items:center;gap:9px;padding:6px;border-radius:13px;width:100%;transition:.12s;}
 .acct:hover{background:var(--forest-tint);}
 .av{width:29px;height:29px;border-radius:50%;background:var(--forest);color:#FFFDF8;display:grid;place-items:center;
@@ -555,6 +558,24 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
 .bar i{display:block;height:100%;border-radius:2px;background:var(--forest-light);}
 
 .arow{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px;}
+/* Forms on the admin pages. No client JavaScript here, so every one of these is a
+   plain POST to /api/admin and a redirect back - which is also why a refused
+   action has to be able to say so on the page it came from. */
+.aform{display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;background:var(--card);
+  border:1px solid var(--line-soft);border-radius:14px;padding:14px 16px;margin-bottom:14px;}
+.afield{display:flex;flex-direction:column;gap:4px;}
+.afield span{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;}
+.aform input,.aform select,.atable input,.atable select{font:inherit;font-size:13.5px;padding:6px 9px;
+  border:1px solid var(--line);border-radius:9px;background:var(--paper);color:var(--ink);}
+.aform input:focus,.aform select:focus,.atable input:focus,.atable select:focus{outline:2px solid var(--forest-light);outline-offset:1px;}
+.aform button,.atable button.abtn{font:inherit;font-size:13.5px;font-weight:600;padding:7px 14px;border-radius:10px;
+  background:var(--forest);color:#FFFDF8;border:0;cursor:pointer;}
+.aform button:hover,.atable button.abtn:hover{background:var(--forest-light);}
+.aform button:disabled,.aform select:disabled{opacity:.45;cursor:not-allowed;}
+.aproblem{background:var(--bad-tint);color:var(--bad);border-radius:12px;padding:10px 14px;
+  font-size:13px;font-weight:600;margin-bottom:14px;max-width:70ch;}
+.afiles{display:flex;flex-direction:column;gap:5px;margin:8px 0;}
+.afiles label{display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer;}
 .achips{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;}
 .achips a{padding:4px 10px;border-radius:99px;border:1px solid var(--line-soft);background:var(--card);
   font-size:12.5px;color:var(--muted);text-decoration:none;transition:.12s;}

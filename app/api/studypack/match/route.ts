@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
 import { packWorkKey, findPackMatches } from '@/lib/studypack';
+import { dedupeObjectives, type Objective } from '@/lib/planner';
 
 export const runtime = 'nodejs';
 
@@ -37,8 +38,8 @@ export async function POST(req: NextRequest) {
       message: `Weeks ${unsigned.join(', ')} of ${klass.year_group} ${klass.subject_id} are waiting for a Head of Department to sign them off. Packs are only built from weeks that have been.` });
   }
 
-  const refs = [...new Set(weeks.flatMap(w =>
-    (w.objectives as { ref: string | null }[]).map(o => o.ref).filter((r): r is string => !!r)))].sort();
+  const objectives = dedupeObjectives(weeks.flatMap(w => w.objectives as Objective[]));
+  const refs = [...new Set(objectives.map(o => o.ref).filter((r): r is string => !!r))].sort();
 
   const key = packWorkKey({ subjectId: klass.subject_id, yearGroup: klass.year_group, academicYear: '2026-27', weekFrom, refs });
   const matches = await findPackMatches(klass.subject_id, klass.year_group, refs);
@@ -49,6 +50,8 @@ export async function POST(req: NextRequest) {
     workKey: key,
     span: { weekFrom, weekTo, weeks: weeks.map(w => ({ week: w.week_number, topic: w.topic_label })) },
     refs,
+    // The codes and what they say, across the whole span.
+    objectives,
     uncoded: refs.length === 0,
     matches,
   });

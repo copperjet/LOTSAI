@@ -111,6 +111,18 @@ interface ClassWeek {
   status: string | null; signedOff: boolean; topic: string | null;
 }
 interface ClassCal { id: string; name: string; subject_id: string; year_group: string; weeks: ClassWeek[] }
+/**
+ * Who reviews, and who reads the meters.
+ *
+ * /api/agenda has always given everybody who is not a teacher the reviewer's day -
+ * the sign-off queue and the submitted planners - and /api/review has always accepted
+ * all four roles. Only this screen disagreed: it tested for 'hod' alone, so a
+ * principal or an administrator was handed a head of department's agenda and a
+ * teacher's chips underneath it, offering to plan classes they do not teach.
+ */
+const REVIEWER_ROLES = ['hod', 'coordinator', 'principal', 'admin'];
+const ADMIN_ROLES = ['admin', 'principal'];
+
 /** app_user.role is a database value. The rail is not the place to print one. */
 const ROLE_SAYS: Record<string, string> = {
   teacher: 'Teacher', hod: 'Head of Department', coordinator: 'Coordinator',
@@ -128,6 +140,7 @@ interface PackMatch {
 interface PackResult {
   studyPackId: string | null; title: string;
   units: { label: string; topics: number }[]; refs: string[]; glossary: number;
+  objectives?: Objective[];
   /** v2 packs are pages of blocks, not units of topics. */
   pages?: { title: string; blocks: number }[];
   layout?: 'a4-landscape' | 'slide-16x9';
@@ -154,6 +167,7 @@ interface UploadResult {
 }
 interface WorksheetResult {
   worksheetId: string | null; title: string; tasks: number; refs: string[];
+  objectives?: Objective[];
 }
 interface WorksheetMatch {
   id: string; title: string; objective_refs: string[]; week_number: number;
@@ -162,6 +176,7 @@ interface WorksheetMatch {
 interface HomeworkResult {
   homeworkId: string | null; title: string;
   sections: number; questions: number; marks: number; minutes: number; refs: string[];
+  objectives?: Objective[];
 }
 /** Homework and worksheets are matched the same way, so they share a match shape. */
 type HomeworkMatch = WorksheetMatch;
@@ -637,9 +652,7 @@ export default function App() {
             Weeks {p.weekFrom}-{p.weekTo} cover {refs.length} objective{refs.length === 1 ? '' : 's'}.
             Nobody has built a study pack for them yet - you are first.
           </p>
-          <div className="row" style={{ gap: 5, marginTop: 8 }}>
-            {refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
-          </div>
+          <ObjectiveList objectives={d.objectives as Objective[] | undefined} refs={refs} />
           <div className="acts" style={{ marginTop: 12 }}>
             <button className="btn primary" onClick={() => doPackGenerate(p)}>Build it</button>
             <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about a minute</span>
@@ -654,6 +667,7 @@ export default function App() {
             Weeks {p.weekFrom}-{p.weekTo} cover {refs.length} objective{refs.length === 1 ? '' : 's'}.
             Somebody has already built an approved pack for the same objectives.
           </p>
+          <ObjectiveList objectives={d.objectives as Objective[] | undefined} refs={refs} />
           <div className="match">
             <h3 style={{ fontSize: 18 }}>{best.title}</h3>
             <div className="row" style={{ marginTop: 10 }}>
@@ -690,9 +704,7 @@ export default function App() {
             Week {weekNumber} covers {refs.length} objective{refs.length === 1 ? '' : 's'}. Nobody has
             set homework on them yet - you are first.
           </p>
-          <div className="row" style={{ gap: 5, marginTop: 8 }}>
-            {refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
-          </div>
+          <ObjectiveList objectives={d.objectives as Objective[] | undefined} refs={refs} />
           <div className="acts" style={{ marginTop: 12 }}>
             <button className="btn primary" onClick={() => doHomeworkGenerate(classId, weekNumber)}>Set it</button>
             <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about a minute</span>
@@ -708,6 +720,7 @@ export default function App() {
             Week {weekNumber} covers {refs.length} objective{refs.length === 1 ? '' : 's'}. Somebody has
             already had homework approved for the same objectives.
           </p>
+          <ObjectiveList objectives={d.objectives as Objective[] | undefined} refs={refs} />
           <div className="match">
             <h3 style={{ fontSize: 18 }}>{best.title}</h3>
             <div className="row" style={{ marginTop: 10 }}>
@@ -739,9 +752,7 @@ export default function App() {
             Week {weekNumber} covers {refs.length} objective{refs.length === 1 ? '' : 's'}. Nobody has an
             approved worksheet for them yet - you are first.
           </p>
-          <div className="row" style={{ gap: 5, marginTop: 8 }}>
-            {refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
-          </div>
+          <ObjectiveList objectives={d.objectives as Objective[] | undefined} refs={refs} />
           <div className="acts" style={{ marginTop: 12 }}>
             <button className="btn primary" onClick={() => doWorksheetGenerate(classId, weekNumber)}>Build it</button>
             <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about a minute</span>
@@ -757,6 +768,7 @@ export default function App() {
             Week {weekNumber} covers {refs.length} objective{refs.length === 1 ? '' : 's'}. Somebody has
             already had an approved worksheet for the same objectives.
           </p>
+          <ObjectiveList objectives={d.objectives as Objective[] | undefined} refs={refs} />
           <div className="match">
             <h3 style={{ fontSize: 18 }}>{best.title}</h3>
             <div className="row" style={{ marginTop: 10 }}>
@@ -860,7 +872,7 @@ export default function App() {
       }
 
       case 'registry':
-        return <RegistryTurn r={d.r as Record<string, unknown>} />;
+        return <RegistryTurn r={d.r as Record<string, unknown>} onSignOff={signOff} />;
 
       case 'coverage':
         return (<>
@@ -1109,10 +1121,11 @@ export default function App() {
     if (r.uncoded) return say('packUncoded', { p });
 
     const refs = (r.refs ?? []) as string[];
+    const objectives = (r.objectives ?? []) as Objective[];
     const best = r.matches?.[0] as PackMatch | undefined;
-    if (!best) return say('packFirst', { p, refs });
+    if (!best) return say('packFirst', { p, refs, objectives });
 
-    say('packMatch', { p, refs, best });
+    say('packMatch', { p, refs, objectives, best });
   }
 
   async function doPackGenerate(p: PackSpan) {
@@ -1235,10 +1248,11 @@ export default function App() {
     if (r.blocked) return say('bound', { text: r.message });
 
     const refs = (r.refs ?? []) as string[];
+    const objectives = (r.objectives ?? []) as Objective[];
     const best = r.matches?.[0] as WorksheetMatch | undefined;
-    if (!best) return say('worksheetFirst', { classId, weekNumber, refs });
+    if (!best) return say('worksheetFirst', { classId, weekNumber, refs, objectives });
 
-    say('worksheetMatch', { classId, weekNumber, refs, best });
+    say('worksheetMatch', { classId, weekNumber, refs, objectives, best });
   }
 
   async function doWorksheetGenerate(classId: string, weekNumber: number) {
@@ -1305,10 +1319,11 @@ export default function App() {
     if (r.blocked) return say('bound', { text: r.message });
 
     const refs = (r.refs ?? []) as string[];
+    const objectives = (r.objectives ?? []) as Objective[];
     const best = r.matches?.[0] as HomeworkMatch | undefined;
-    if (!best) return say('homeworkFirst', { classId, weekNumber, refs });
+    if (!best) return say('homeworkFirst', { classId, weekNumber, refs, objectives });
 
-    say('homeworkMatch', { classId, weekNumber, refs, best });
+    say('homeworkMatch', { classId, weekNumber, refs, objectives, best });
   }
 
   async function doHomeworkGenerate(classId: string, weekNumber: number) {
@@ -1431,66 +1446,18 @@ export default function App() {
     say('registry', { r });
   }
 
-  function RegistryTurn({ r }: { r: Record<string, unknown> }) {
-    const gaps: Gap[] = (r.gaps as Gap[]) ?? [];
-    const conflicts = gaps.filter(g => g.kind === 'conflict');
-    const unreadable = gaps.filter(g => g.kind === 'unreadable');
-    const unplaced = gaps.filter(g => g.kind === 'unclassified');
-    const blocked = (r.blocked ?? []) as { year_group: string; subject_id: string; weeks: number; uncoded: number; source: string }[];
-
-    return (<>
-      <p className="said">
-        {blocked.length
-          ? <>{blocked.length} imported subject{blocked.length === 1 ? '' : 's'} cannot be planned yet. I will not guess which file is current, and I will not invent a syllabus code.</>
-          : <>Everything imported is signed off.</>}
-      </p>
-
-      {blocked.map(b => (
-        <div key={`${b.year_group}-${b.subject_id}`} className="c pad">
-          <div className="row" style={{ justifyContent: 'space-between' }}>
-            <b>{b.year_group} {b.subject_id}</b>
-            <button className="btn" onClick={() => signOff(b.year_group, b.subject_id)}>Sign it off</button>
-          </div>
-          <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
-            {b.weeks} weeks imported, {b.uncoded} of them with no syllabus references.
-          </p>
-        </div>
-      ))}
-
-      {/* Before generation is even possible: files that never became weeks.
-          A conflict needs a decision; the rest need a look. Detail folds away. */}
-      {conflicts.length > 0 && (
-        <div className="c pad">
-          <b>{conflicts.length} conflict{conflicts.length === 1 ? '' : 's'} need a decision</b>
-          {conflicts.map(g => (
-            <details key={g.id} style={{ marginTop: 10 }}>
-              <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>
-                {g.year_group} {g.subject} {g.semester ? `· S${g.semester}` : ''}
-              </summary>
-              <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, color: 'var(--muted)' }}>
-                {g.files.map(f => <li key={f}>{f}</li>)}
-              </ul>
-            </details>
-          ))}
-        </div>
-      )}
-
-      {(unreadable.length > 0 || unplaced.length > 0) && (
-        <details className="c pad">
-          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
-            {unreadable.length} could not be read · {unplaced.length} not yet placed
-          </summary>
-        </details>
-      )}
-    </>);
-  }
-
-  async function signOff(yearGroup: string, subjectId: string) {
+  /** One subject or twenty, in a single request: the queue after an import is
+   *  twenty subjects long, and twenty confirmations of the same act is not review. */
+  async function signOff(subjects: { yearGroup: string; subjectId: string }[]) {
+    if (!subjects.length) return;
     await fetch('/api/review', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'sign_off', yearGroup, subjectId }),
+      body: JSON.stringify({ action: 'sign_off', subjects }),
     });
-    say('said', { text: `${yearGroup} ${subjectId} signed off. Planning is open for it now.` });
+    const what = subjects.length === 1
+      ? `${subjects[0].yearGroup} ${subjects[0].subjectId} signed off. Planning is open for it now.`
+      : `${subjects.length} subjects signed off. Planning is open for them now.`;
+    say('said', { text: what });
     loadAgenda();
   }
 
@@ -1514,11 +1481,12 @@ export default function App() {
 
   const chips = (() => {
     const lead = agenda[0];
-    const pool = user?.role === 'hod'
+    const reviewer = REVIEWER_ROLES.includes(user?.role ?? 'teacher');
+    const pool = reviewer
       ? ['Show me what needs reviewing', 'Curriculum sign-off', 'Coverage']
       : ['Plan next week', 'Set homework', 'Make a worksheet', 'Make a study pack', 'How did today go?'];
     const first = lead?.act ?? pool[0];
-    const max = user?.role === 'hod' ? 3 : 5;
+    const max = reviewer ? 3 : 5;
     return [first, ...pool.filter(p => p !== first)].slice(0, max);
   })();
 
@@ -1562,6 +1530,11 @@ export default function App() {
             <span className={`sw ${online ? 'on' : ''}`}><i /></span>
             <span>{online ? 'Online' : 'Offline - capture still works'}</span>
           </div>
+          {/* The one way in. /admin answers notFound() to everybody else, so this is
+              shown to the roles that can actually open it and to nobody else. */}
+          {user && ADMIN_ROLES.includes(user.role) && (
+            <a className="adminlink" href="/admin">Administration</a>
+          )}
           {user && <div className="acct">
             <span className="av">{user.name.split(' ').map(s => s[0]).join('')}</span>
             <span className="nm"><b>{user.name}</b><span>{ROLE_SAYS[user.role] ?? user.role}</span></span>
@@ -1616,7 +1589,7 @@ export default function App() {
                       title="Attach a file or a photo of a page"
                       aria-label="Attach a file or a photo of a page">&#128206;</button>
               <textarea ref={input} rows={1} value={draft}
-                placeholder={pending.current ? 'Say how the lesson went…' : 'Ask, or just pick one above - you never have to write a prompt'}
+                placeholder={pending.current ? 'Say how the lesson went…' : 'Ask, or just pick one above'}
                 onChange={e => setDraft(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
               <button className="send" onClick={send} aria-label="Send">↑</button>
@@ -1794,6 +1767,167 @@ function PlanPicker({ classes, today, onPick }: {
 }
 
 /**
+ * Objectives, in the curriculum's own words.
+ *
+ * Every card that offers to build something used to print the codes alone -
+ * "4Rg.04 4Rs.01 4Rs.04" - because that is all the match routes sent. A code is an
+ * index into the curriculum, not a statement of what the week teaches, and a teacher
+ * deciding whether to generate is deciding about the objectives, not their numbers.
+ *
+ * Threads outlive the tab, so a turn saved before the routes carried the text still
+ * has only `refs`. That case falls back to the old pill row rather than rendering
+ * nothing.
+ */
+function ObjectiveList({ objectives, refs }: { objectives?: Objective[]; refs?: string[] }) {
+  const list = objectives ?? [];
+  if (!list.length) {
+    return (
+      <div className="row" style={{ gap: 5, marginTop: 8 }}>
+        {(refs ?? []).map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+      </div>
+    );
+  }
+
+  const SHOWN = 5;
+  const row = (o: Objective, i: number) => (
+    <li key={`${o.ref ?? ''}-${i}`} style={{ display: 'flex', gap: 8, alignItems: 'baseline', marginTop: 6 }}>
+      {o.ref && <span className="pill ref" style={{ flex: 'none' }}>{o.ref}</span>}
+      <span style={{ fontSize: 13.5 }}>{o.text}</span>
+    </li>
+  );
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+        {list.slice(0, SHOWN).map(row)}
+      </ul>
+      {list.length > SHOWN && (
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--muted)' }}>
+            {list.length - SHOWN} more
+          </summary>
+          <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+            {list.slice(SHOWN).map((o, i) => row(o, i + SHOWN))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The curriculum sign-off card.
+ *
+ * Sign-off is one decision per subject, and after an import there are twenty of them
+ * waiting. Twenty buttons meant twenty round trips and twenty confirmations of the
+ * same act, so the subjects are ticked and signed off together - the reviewer still
+ * decides each one, they just say so once. Every subject is logged separately, which
+ * is what makes "who opened planning for CP1 English" answerable afterwards.
+ *
+ * It lives out here rather than inside the page component because it holds the
+ * selection: a component declared inside a render is a new component on every render,
+ * and its state is thrown away with it.
+ */
+function RegistryTurn({ r, onSignOff }: {
+  r: Record<string, unknown>;
+  onSignOff: (subjects: { yearGroup: string; subjectId: string }[]) => void;
+}) {
+  const gaps: Gap[] = (r.gaps as Gap[]) ?? [];
+  const conflicts = gaps.filter(g => g.kind === 'conflict');
+  const unreadable = gaps.filter(g => g.kind === 'unreadable');
+  const unplaced = gaps.filter(g => g.kind === 'unclassified');
+  const blocked = (r.blocked ?? []) as { year_group: string; subject_id: string; weeks: number; uncoded: number; source: string }[];
+
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [done, setDone] = useState(false);
+
+  const key = (b: { year_group: string; subject_id: string }) => `${b.year_group}|${b.subject_id}`;
+  const toggle = (k: string) => setPicked(p => {
+    const next = new Set(p);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    return next;
+  });
+  const all = () => setPicked(picked.size === blocked.length ? new Set() : new Set(blocked.map(key)));
+  const send = (subjects: { yearGroup: string; subjectId: string }[]) => {
+    setDone(true);
+    onSignOff(subjects);
+  };
+
+  return (<>
+    <p className="said">
+      {blocked.length
+        ? <>{blocked.length} imported subject{blocked.length === 1 ? '' : 's'} cannot be planned yet. I will not guess which file is current, and I will not invent a syllabus code.</>
+        : <>Everything imported is signed off.</>}
+    </p>
+
+    {blocked.length > 0 && (
+      <div className="c pad">
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <label className="row" style={{ gap: 8, cursor: 'pointer', fontWeight: 600 }}>
+            <input type="checkbox" checked={picked.size === blocked.length && blocked.length > 0}
+                   onChange={all} aria-label="Select every subject" />
+            {picked.size ? `${picked.size} selected` : 'Select all'}
+          </label>
+          <button className="btn primary" disabled={!picked.size || done}
+                  onClick={() => send(blocked.filter(b => picked.has(key(b)))
+                    .map(b => ({ yearGroup: b.year_group, subjectId: b.subject_id })))}>
+            Sign off {picked.size || ''} subject{picked.size === 1 ? '' : 's'}
+          </button>
+        </div>
+        <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 6 }}>
+          Each one is recorded against your name separately.
+        </p>
+      </div>
+    )}
+
+    {blocked.map(b => (
+      <div key={key(b)} className="c pad">
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <label className="row" style={{ gap: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={picked.has(key(b))} onChange={() => toggle(key(b))}
+                   aria-label={`Select ${b.year_group} ${b.subject_id}`} />
+            <b>{b.year_group} {b.subject_id}</b>
+          </label>
+          <button className="btn" disabled={done}
+                  onClick={() => send([{ yearGroup: b.year_group, subjectId: b.subject_id }])}>
+            Sign it off
+          </button>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
+          {b.weeks} weeks imported, {b.uncoded} of them with no syllabus references.
+        </p>
+      </div>
+    ))}
+
+    {/* Before generation is even possible: files that never became weeks.
+        A conflict needs a decision; the rest need a look. Detail folds away. */}
+    {conflicts.length > 0 && (
+      <div className="c pad">
+        <b>{conflicts.length} conflict{conflicts.length === 1 ? '' : 's'} need a decision</b>
+        {conflicts.map(g => (
+          <details key={g.id} style={{ marginTop: 10 }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>
+              {g.year_group} {g.subject} {g.semester ? `· S${g.semester}` : ''}
+            </summary>
+            <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, color: 'var(--muted)' }}>
+              {g.files.map(f => <li key={f}>{f}</li>)}
+            </ul>
+          </details>
+        ))}
+      </div>
+    )}
+
+    {(unreadable.length > 0 || unplaced.length > 0) && (
+      <details className="c pad">
+        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+          {unreadable.length} could not be read · {unplaced.length} not yet placed
+        </summary>
+      </details>
+    )}
+  </>);
+}
+
+/**
  * Pick a class, then a span of weeks, for a study pack. A pack covers a run of
  * weeks rather than one, so this asks for a start and an end — over the same
  * signed-off teaching weeks the planner picker offers.
@@ -1906,8 +2040,8 @@ function PackCard({ r, onOpen, onPdf, onApprove }: {
             <li key={i}>{u.label} - {u.count} {u.noun}{u.count === 1 ? '' : 's'}</li>
           ))}
         </ul>
-        <div className="row" style={{ gap: 5 }}>
-          {r.refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+        <ObjectiveList objectives={r.objectives} refs={r.refs} />
+        <div className="row" style={{ gap: 5, marginTop: 8 }}>
           <span className="pill grey">{r.glossary} glossary term{r.glossary === 1 ? '' : 's'}</span>
         </div>
       </div>
@@ -2000,9 +2134,7 @@ function HomeworkCard({ r, onOpen, onApprove }: {
         from the curriculum.
       </p>
       <div className="c pad">
-        <div className="row" style={{ gap: 5 }}>
-          {r.refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
-        </div>
+        <ObjectiveList objectives={r.objectives} refs={r.refs} />
       </div>
       <div className="acts" style={{ marginTop: 12 }}>
         <button className="btn primary" onClick={onApprove}>Approve &amp; send to Drive</button>
@@ -2022,9 +2154,7 @@ function WorksheetCard({ r, onOpen, onApprove }: {
         (support, core, extension) with an answer key. Objectives are copied from the curriculum.
       </p>
       <div className="c pad">
-        <div className="row" style={{ gap: 5 }}>
-          {r.refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
-        </div>
+        <ObjectiveList objectives={r.objectives} refs={r.refs} />
       </div>
       <div className="acts" style={{ marginTop: 12 }}>
         <button className="btn primary" onClick={onApprove}>Approve &amp; send to Drive</button>
@@ -2461,10 +2591,13 @@ const TASKS: { id: string; label: string; note: string; roles: string[] }[] = [
   { id: 'pack', label: 'Make a study pack', note: 'A span of weeks, to revise from', roles: ['teacher'] },
   { id: 'evaluate', label: 'Evaluate lessons taught', note: 'About thirty seconds each', roles: ['teacher'] },
   { id: 'upload', label: 'Build from a file', note: 'A photo or a document you already have', roles: ['teacher'] },
-  { id: 'review', label: 'Review submitted planners', note: 'The checks are already done', roles: ['hod', 'coordinator'] },
-  { id: 'registry', label: 'Sign off the curriculum', note: 'Nobody can plan an unsigned week', roles: ['hod', 'coordinator'] },
-  { id: 'coverage', label: 'See coverage', note: 'Computed, never typed', roles: ['hod', 'coordinator', 'principal'] },
-  { id: 'bank', label: 'Open the shared bank', note: 'What your colleagues have had approved', roles: ['teacher', 'hod', 'coordinator', 'principal'] },
+  // Every role /api/review accepts as a reviewer is offered the reviewer's work.
+  // An administrator used to open this card to an empty list: the agenda had given
+  // them twenty subjects to sign off and this menu offered them nothing to do.
+  { id: 'review', label: 'Review submitted planners', note: 'The checks are already done', roles: ['hod', 'coordinator', 'principal', 'admin'] },
+  { id: 'registry', label: 'Sign off the curriculum', note: 'Nobody can plan an unsigned week', roles: ['hod', 'coordinator', 'principal', 'admin'] },
+  { id: 'coverage', label: 'See coverage', note: 'Computed, never typed', roles: ['hod', 'coordinator', 'principal', 'admin'] },
+  { id: 'bank', label: 'Open the shared bank', note: 'What your colleagues have had approved', roles: ['teacher', 'hod', 'coordinator', 'principal', 'admin'] },
 ];
 
 function TaskMenu({ role, actions, onPick }: {

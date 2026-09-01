@@ -361,6 +361,37 @@ export function mockOutcomes(prompt: string) {
   return { outcomes: lines.slice(0, 6) };
 }
 
+/**
+ * Homework, as the model would return it.
+ *
+ * Deliberately too long: three sections of four questions, which is what the live
+ * model tended to produce and what made a week's homework print as seven pages. The
+ * caps in lib/homework.ts trim it to two sections and eight questions, so the local
+ * path exercises the trimming rather than stepping around it.
+ */
+export function mockHomework(cached: string) {
+  const idxs = [...cached.matchAll(/^\s*\[(\d+)\]/gm)].map(m => +m[1]);
+  const pick = (n: number) => (idxs.length ? [idxs[n % idxs.length]] : [0]);
+  const sections = [0, 1, 2].map(n => ({
+    heading: ['Warm up', 'Practice', 'Stretch'][n],
+    instructions: 'Answer in the space provided. Show your working where the question asks for it.',
+    objective_indexes: pick(n),
+    questions: [0, 1, 2, 3].map(q => ({
+      text: `Question ${n + 1}.${q + 1}: work through this using what you did in class.`,
+      marks: q + 1,
+      answer_lines: q < 2 ? 2 : 5,
+      answer: 'Answers vary; accept correct working consistent with the objective.',
+    })),
+  }));
+  return {
+    title: 'Week homework',
+    intro: 'Work through both sections. Bring it back on Monday.',
+    duration_minutes: 30,
+    sections,
+    teacher_note: 'If a learner cannot get started, set the first section only and mark it with them.',
+  };
+}
+
 /** Routed on CallOpts.workflow. Anything unknown gets an empty object. */
 export function mockFor(workflow: string, cached: string, prompt: string): unknown {
   if (workflow === 'planner_create' || workflow === 'planner_adapt') return mockPlan(cached, prompt);
@@ -371,6 +402,7 @@ export function mockFor(workflow: string, cached: string, prompt: string): unkno
   if (workflow === 'studypack_fill') return mockPackFill(prompt);
   if (workflow === 'studypack_outcomes') return mockOutcomes(prompt);
   if (workflow === 'worksheet_create') return mockWorksheet(cached);
+  if (workflow === 'homework_create') return mockHomework(cached);
   // Plain text, not JSON: the OCR call has no schema, so lib/llm.ts returns
   // whatever the fixture is verbatim.
   if (workflow === 'ocr_extract') return mockOcr();

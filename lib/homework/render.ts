@@ -44,14 +44,14 @@ async function load(homeworkId: string): Promise<{ row: Row; meta: HomeworkMeta 
 
 export async function renderHomework(homeworkId: string): Promise<Uint8Array> {
   const { row, meta } = await load(homeworkId);
-  return new TextEncoder().encode(renderPackHtml(homeworkPack(row.content, meta)));
+  return new TextEncoder().encode(renderPackHtml(homeworkPack(row.content, meta), { cover: false }));
 }
 
 export async function renderHomeworkPdf(homeworkId: string): Promise<Uint8Array> {
   const { row, meta } = await load(homeworkId);
   const pack = homeworkPack(row.content, meta);
   try {
-    return await printHtmlToPdf(renderPackHtml(pack, { paged: true }), footerTemplate(pack));
+    return await printHtmlToPdf(renderPackHtml(pack, { paged: true, cover: false }), footerTemplate(pack));
   } catch (e) {
     console.error('[homework-pdf] browser print failed, falling back to pdf-lib: '
       + (e instanceof Error ? e.message : String(e)));

@@ -13,6 +13,28 @@ import { workKey, overlap, MatchTier, TIER_MEANING } from './workkey';
 
 export interface Objective { ref: string | null; text: string }
 
+/**
+ * The week's objectives, de-duplicated, in the order the curriculum states them.
+ *
+ * The cards used to be handed `refs: string[]` alone, so a teacher deciding whether to
+ * generate saw "4Rg.04 4Rs.01 4Rs.04" and nothing about what the week actually covers.
+ * A code is an index, not an objective. Every route that offers a decision now sends
+ * the text with it, and this is what they all use so the de-duplication is the same
+ * one everywhere: same code and same wording is the same objective, said twice.
+ */
+export function dedupeObjectives(objectives: Objective[]): Objective[] {
+  const seen = new Set<string>();
+  const out: Objective[] = [];
+  for (const o of objectives ?? []) {
+    if (!o?.text) continue;
+    const key = `${o.ref ?? ''}|${o.text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ref: o.ref ?? null, text: o.text });
+  }
+  return out;
+}
+
 export interface RegistryWeek {
   id: string; topic_label: string; objectives: Objective[];
   activities: string[]; resources: string[];

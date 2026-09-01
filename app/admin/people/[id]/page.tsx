@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { admin, currentUser } from '@/lib/supabase';
-import { money, when } from '@/lib/admin';
+import { money, when, ROLES, ROLE_SAYS, PROBLEM_SAYS } from '@/lib/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,8 +17,12 @@ interface Entry {
 
 const RECENT = 50;
 
-export default async function Person({ params }: { params: Promise<{ id: string }> }) {
+export default async function Person({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ e?: string }>;
+}) {
   const { id } = await params;
+  const { e } = await searchParams;
   const db = admin();
   const me = await currentUser();
 
@@ -41,12 +45,40 @@ export default async function Person({ params }: { params: Promise<{ id: string 
   return (
     <>
       <h1>{person.full_name}</h1>
+      {e && <p className="aproblem">{PROBLEM_SAYS[e] ?? 'That did not work.'}</p>}
       <p className="anote awide">
-        {person.email} · {person.role}{person.department ? ` · ${person.department}` : ''} ·
+        {person.email} · {ROLE_SAYS[person.role] ?? person.role}{person.department ? ` · ${person.department}` : ''} ·
         last seen {when(person.last_seen_at)} ·
         {person.pin_set_at ? ` PIN set ${when(person.pin_set_at)}` : ' no PIN set yet'}
         {locked ? <> · <b className="bad">locked out until {new Date(person.locked_until as string).toLocaleTimeString('en-GB')}</b></> : null}
       </p>
+
+      {/* A role decides what somebody is shown and what they may sign off, so it is
+          changed here rather than in the database. Never your own: an administrator
+          who can demote themselves can lock the school out of this page by accident,
+          and the route refuses it even if this form is bypassed. */}
+      <h2>Role and department</h2>
+      <form className="aform" method="post" action="/api/admin">
+        <input type="hidden" name="action" value="set_role" />
+        <input type="hidden" name="userId" value={person.id} />
+        <label className="afield">
+          <span>Role</span>
+          <select name="role" defaultValue={person.role} disabled={me.id === person.id}>
+            {ROLES.map(r => <option key={r} value={r}>{ROLE_SAYS[r]}</option>)}
+          </select>
+        </label>
+        <button type="submit" disabled={me.id === person.id}>Change the role</button>
+        {me.id === person.id && <span className="anote">You cannot change your own role.</span>}
+      </form>
+      <form className="aform" method="post" action="/api/admin">
+        <input type="hidden" name="action" value="set_department" />
+        <input type="hidden" name="userId" value={person.id} />
+        <label className="afield">
+          <span>Department</span>
+          <input name="department" defaultValue={person.department ?? ''} placeholder="Primary" />
+        </label>
+        <button type="submit">Save the department</button>
+      </form>
 
       <h2>Devices</h2>
       {!sessions?.length ? <p className="anote">No signed-in devices.</p> : (
@@ -75,6 +107,8 @@ export default async function Person({ params }: { params: Promise<{ id: string 
 
       {/* A PIN is a thing people forget over a holiday. Clearing it makes the
           next sign-in choose a new one; it never reveals or sets one for them.
+          Unlocking is the smaller version of the same favour: it clears the
+          fifteen minute lockout without touching the PIN they still know.
           Deactivating is missing for yourself on purpose — locking the last
           administrator out of the dashboard is not a mistake worth allowing. */}
       <div className="arow">
@@ -83,6 +117,13 @@ export default async function Person({ params }: { params: Promise<{ id: string 
           <input type="hidden" name="userId" value={person.id} />
           <button className="quiet" type="submit">Clear the PIN</button>
         </form>
+        {locked && (
+          <form method="post" action="/api/admin">
+            <input type="hidden" name="action" value="unlock" />
+            <input type="hidden" name="userId" value={person.id} />
+            <button className="quiet" type="submit">Unlock them now</button>
+          </form>
+        )}
         {me.id !== person.id && (
           <form method="post" action="/api/admin">
             <input type="hidden" name="action" value={person.is_active ? 'deactivate' : 'reactivate'} />

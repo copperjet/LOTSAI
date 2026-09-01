@@ -68,6 +68,12 @@ interface QuizQ { q: string; options: string[]; correct: number; explain: string
 
 export interface RenderOpts {
   /**
+   * Draw the cover sheet. A study pack wants one - it is where the Reference Guide
+   * puts the full objective list. A homework does not: it is a two page paper a
+   * learner writes on, and a cover would be half of what they were handed.
+   */
+  cover?: boolean;
+  /**
    * Server print. The browser draws the running footer and the page number itself
    * (lib/pdf/renderers/studypack_print.ts), because it is the only thing that knows
    * how many physical pages a section actually took: a dense section runs onto a
@@ -93,6 +99,7 @@ export function footerTemplate(pack: PackV2): string {
 export function renderPackHtml(pack: PackV2, opts: RenderOpts = {}): string {
   const size = SIZES[pack.layout] ?? SIZES['a4-landscape'];
   const paged = opts.paged === true;
+  const cover = opts.cover !== false;
   // How much of the page height a sheet does not get, in millimetres.
   //
   // On the server print that is the strip the running footer is stamped into. On the
@@ -116,10 +123,10 @@ export function renderPackHtml(pack: PackV2, opts: RenderOpts = {}): string {
   // "n of N" - a pack whose last page reads 8/8 while its first reads 1/7 looks like a
   // page went missing.
   const hasQuiz = pack.pages.some(p => (p.blocks ?? []).some(b => b.type === 'quiz'));
-  const total = pack.pages.length + 1 + (hasQuiz ? 1 : 0);
+  const total = pack.pages.length + (cover ? 1 : 0) + (hasQuiz ? 1 : 0);
 
   const sheets = pack.pages.map((page, index) => {
-    const pi = index + 1;   // the cover is sheet 0
+    const pi = cover ? index + 1 : index;   // with a cover, it is sheet 0
     const objectives = (page.objective_indexes ?? [])
       .map(i => pack.objectives[i]).filter(Boolean);
 
@@ -143,7 +150,7 @@ export function renderPackHtml(pack: PackV2, opts: RenderOpts = {}): string {
       pack, index: pi, total, accent: page.accent, paged,
       eyebrow: page.eyebrow, title: page.title,
       objectives: objectives.map(o => ({ ref: o.ref, text: o.text })),
-      body,
+      body, cover,
     });
   }).join('');
 
@@ -151,7 +158,7 @@ export function renderPackHtml(pack: PackV2, opts: RenderOpts = {}): string {
     ? sheet({
       pack, index: total - 1, total, accent: 'gold', paged,
       eyebrow: 'FOR THE TEACHER', title: 'Answer key',
-      objectives: [],
+      objectives: [], cover,
       body: `<div class="answer-key">${answerKey.map(a =>
         `<p><b>${a.n}.</b> ${esc(a.correct)}${a.explain ? ` <span class="muted">- ${esc(a.explain)}</span>` : ''}</p>`).join('')}</div>`,
       printOnly: true,
@@ -181,7 +188,7 @@ ${css(size, paged, slackMm)}
   <button onclick="__packPrepare();window.print()">Print / Save as PDF</button>
 </div>
 <div class="deck">
-${coverSheet(pack, total)}
+${cover ? coverSheet(pack, total) : ''}
 ${sheets}
 ${keySheet}
 </div>
@@ -260,6 +267,9 @@ function coverSheet(pack: PackV2, total: number): string {
 function sheet(o: {
   pack: PackV2; index: number; total: number; accent: string; paged?: boolean;
   eyebrow: string | null; title: string; objectives: { ref: string | null; text: string }[]; body: string;
+  /** Whether this document has a cover, which is where a long objective list is
+   *  stated in full. Without one there is nowhere to defer to, so nothing is said. */
+  cover?: boolean;
   printOnly?: boolean;
 }): string {
   const { pack } = o;
@@ -276,7 +286,8 @@ function sheet(o: {
   ${o.objectives.length ? `<div class="objectives">${o.objectives.slice(0, PAGE_OBJECTIVES).map(t =>
     `<p class="obj">${t.ref ? `<span class="ref">${esc(t.ref)}</span>` : ''}${esc(t.text)}</p>`).join('')}${
     o.objectives.length > PAGE_OBJECTIVES
-      ? `<p class="obj muted">and ${o.objectives.length - PAGE_OBJECTIVES} more, listed in full on the cover</p>` : ''
+      ? `<p class="obj muted">and ${o.objectives.length - PAGE_OBJECTIVES} more${
+          o.cover === false ? '' : ', listed in full on the cover'}</p>` : ''
   }</div>` : ''}
   <main class="sheet-body">${o.body}</main>
   ${o.paged ? '' : `<footer class="sheet-foot">

@@ -4,6 +4,7 @@ import * as engine from '@/lib/engine';
 import { worksheetWorkKey, type WorksheetContent, type RegistryWeekLite } from '@/lib/worksheet';
 import { storeArtefact } from '@/lib/pdf/store';
 import { viewUrl } from '@/lib/artefactUrl';
+import { dedupeObjectives } from '@/lib/planner';
 
 export const runtime = 'nodejs';
 export const maxDuration = 90;
@@ -77,6 +78,7 @@ export async function POST(req: NextRequest) {
     title: content.title,
     tasks: content.tasks.length,
     refs: content.objective_refs,
+    objectives: dedupeObjectives(content.tasks.flatMap(t => t.objectives ?? [])),
     render,
   });
 }

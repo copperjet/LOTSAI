@@ -17,8 +17,9 @@ export const dynamic = 'force-dynamic';
  * The check runs in the layout, so every page beneath it inherits the gate and
  * no route can be added that forgets to ask. It answers notFound() rather than
  * 403: a teacher who guesses the URL should learn that there is nothing here,
- * not that there is something here they cannot have. Nothing in the teacher UI
- * links to /admin.
+ * not that there is something here they cannot have. Nothing a teacher is shown
+ * links here; an administrator gets a link in the rail, because an administrator
+ * who has to remember a URL is one who does not come back.
  */
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   let user;
@@ -38,6 +39,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <nav className="atabs">
           <Link href="/admin">Overview</Link>
           <Link href="/admin/people">People</Link>
+          <Link href="/admin/classes">Classes</Link>
+          <Link href="/admin/curriculum">Curriculum</Link>
           <Link href="/admin/activity">Activity</Link>
           <Link href="/admin/health">Health</Link>
           <Link href="/" className="aback">Back to LOTS AI</Link>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
 import { homeworkWorkKey, findHomeworkMatches } from '@/lib/homework';
+import { dedupeObjectives, type Objective } from '@/lib/planner';
 
 export const runtime = 'nodejs';
 
@@ -34,8 +35,8 @@ export async function POST(req: NextRequest) {
       message: `Week ${weekNumber} of ${klass.year_group} ${klass.subject_id} is waiting for a Head of Department to sign it off. Homework is only set from weeks that have been.` });
   }
 
-  const refs = [...new Set((week.objectives as { ref: string | null }[])
-    .map(o => o.ref).filter((r): r is string => !!r))].sort();
+  const objectives = dedupeObjectives(week.objectives as Objective[]);
+  const refs = [...new Set(objectives.map(o => o.ref).filter((r): r is string => !!r))].sort();
 
   const key = homeworkWorkKey({
     subjectId: klass.subject_id, yearGroup: klass.year_group,
@@ -49,6 +50,9 @@ export async function POST(req: NextRequest) {
     workKey: key,
     week: { weekNumber, topic: week.topic_label },
     refs,
+    // The codes and what they say. A teacher decides on the objectives, not on
+    // their numbers, so both go to the card.
+    objectives,
     uncoded: refs.length === 0,
     matches,
   });

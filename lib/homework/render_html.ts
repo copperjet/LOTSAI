@@ -45,43 +45,33 @@ export function homeworkPack(content: HomeworkContent, meta: HomeworkMeta): Pack
     .reduce((n, q) => n + (q.marks || 0), 0);
 
   const pages: Page[] = [];
+  const sections = content.sections ?? [];
 
-  // The front page carries what a learner needs before they start: how long it should
-  // take, what it is worth, and the instruction in the teacher's own words.
-  pages.push({
-    id: 'brief',
-    eyebrow: `WEEK ${meta.weekNumber} HOMEWORK`,
-    title: content.title,
-    objective_indexes: objectives.map((_, i) => i),
-    accent: 'forest',
-    blocks: [
-      {
+  /**
+   * One page per section, and nothing else the learner has to turn past.
+   *
+   * There used to be a brief page in front of these - the duration, a checklist and a
+   * contents page - which made a two-section homework four sheets before the answer
+   * key. A homework is not a booklet: what a learner needs before they start is one
+   * line, and it belongs at the top of the first question page. So the brief is a
+   * callout on page one, the hand-in checklist closes the last page, and the contents
+   * page is gone.
+   *
+   * A section too long for a page still runs on to a continuation sheet - the pack's
+   * paginator does that - which is why lib/homework.ts caps the questions rather than
+   * trusting the model to.
+   */
+  sections.forEach((sec, i) => {
+    const blocks: Block[] = [];
+    const first = i === 0, last = i === sections.length - 1;
+
+    if (first) {
+      blocks.push({
         type: 'callout', tone: 'note', span: 'full',
         heading: `${content.duration_minutes} minutes${marks ? ` - ${marks} marks` : ''}`,
         body: content.intro || 'Work through every section. Show your working where a question asks for it.',
-      },
-      {
-        type: 'checklist', span: 'full',
-        columns: [{
-          heading: 'Before you hand it in',
-          blurb: null,
-          items: [
-            'I have answered every question.',
-            'I have shown my working where it was asked for.',
-            'I have written in full sentences where the question asked me to.',
-            'I have read my answers back once.',
-          ],
-        }],
-      },
-      { type: 'contents', span: 'full', heading: 'What is in this homework' },
-    ],
-  });
-
-  // One page per section. A section too long for a page runs on to a continuation
-  // sheet with the same heading - the pack's paginator does that, and it is exactly
-  // why this is composed as a pack rather than drawn separately.
-  (content.sections ?? []).forEach((sec, i) => {
-    const blocks: Block[] = [];
+      });
+    }
     if (sec.instructions?.trim()) {
       blocks.push({ type: 'callout', tone: 'tip', span: 'full', heading: null, body: sec.instructions });
     }
@@ -91,14 +81,29 @@ export function homeworkPack(content: HomeworkContent, meta: HomeworkMeta): Pack
         text: q.text, marks: q.marks || null, answer_lines: q.answer_lines || 2,
       })),
     });
+    if (last) {
+      blocks.push({
+        type: 'checklist', span: 'half',
+        columns: [{
+          heading: 'Before you hand it in',
+          blurb: null,
+          items: [
+            'I have answered every question.',
+            'I have shown my working where it was asked for.',
+            'I have read my answers back once.',
+          ],
+        }],
+      });
+    }
+
     pages.push({
       id: `section-${i + 1}`,
-      eyebrow: `SECTION ${i + 1}`,
+      eyebrow: first ? `WEEK ${meta.weekNumber} HOMEWORK` : `SECTION ${i + 1}`,
       title: sec.heading || `Section ${i + 1}`,
       objective_indexes: (sec.objectives ?? [])
         .map(o => indexOf.get(`${o.ref ?? ''}|${o.text}`))
         .filter((n): n is number => n != null),
-      accent: ACCENTS[(i + 1) % ACCENTS.length],
+      accent: ACCENTS[i % ACCENTS.length],
       blocks,
     });
   });
@@ -106,7 +111,7 @@ export function homeworkPack(content: HomeworkContent, meta: HomeworkMeta): Pack
   // The answer key. The pack builds one automatically from quiz blocks only, and
   // homework has no quiz, so the answers are written out as a page of their own -
   // marked for the teacher, and last, so the paper can be worked before it is seen.
-  const answers = (content.sections ?? []).flatMap((sec, si) =>
+  const answers = sections.flatMap((sec, si) =>
     (sec.questions ?? []).map((q, qi) => ({
       heading: `${si + 1}.${qi + 1}${q.marks ? `  [${q.marks}]` : ''}`,
       body: q.answer || 'Accept any reasonable answer.',
@@ -145,7 +150,8 @@ export function homeworkPack(content: HomeworkContent, meta: HomeworkMeta): Pack
   };
 }
 
-/** The homework as one self-contained HTML document. */
+/** The homework as one self-contained HTML document. No cover: a two page paper
+ *  handed to a learner should be two pages, not a cover and two pages. */
 export function renderHomeworkHtml(content: HomeworkContent, meta: HomeworkMeta): string {
-  return renderPackHtml(homeworkPack(content, meta));
+  return renderPackHtml(homeworkPack(content, meta), { cover: false });
 }

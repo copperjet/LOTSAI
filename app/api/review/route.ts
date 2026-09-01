@@ -3,12 +3,17 @@ import { admin, currentUser, audit } from '@/lib/supabase';
 
 export const runtime = 'nodejs';
 
+/** A reviewer signing off the whole school at once is still a reviewer; a request
+ *  carrying thousands of subjects is a mistake or a probe. */
+const MAX_AT_ONCE = 100;
+
 /**
  * GET  /api/review                 the HOD's queue, with gate results attached
  * GET  /api/review?view=bank       the shared bank, ranked
  * GET  /api/review?view=registry   what is still blocking generation
  * GET  /api/review?view=coverage   computed coverage per class
- * POST /api/review  { action: 'sign_off', yearGroup, subjectId }
+ * POST /api/review  { action: 'sign_off', subjects: [{ yearGroup, subjectId }] }
+ *                   { action: 'sign_off', yearGroup, subjectId }   - one, as before
  */
 export async function GET(req: NextRequest) {
   const db = admin();
@@ -94,15 +99,43 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Only a reviewer can sign off the curriculum' }, { status: 403 });
   }
 
-  const { action, yearGroup, subjectId } = await req.json();
+  const body = await req.json();
+  const { action, yearGroup, subjectId } = body;
   if (action !== 'sign_off') return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
 
-  // Sign-off is what opens generation for a subject (Addendum C section C7).
-  // It is a named human act, and it is logged as one.
-  const { count } = await db.from('curriculum_week')
-    .update({ signed_off_by: user.id, signed_off_at: new Date().toISOString() }, { count: 'exact' })
-    .match({ year_group: yearGroup, subject_id: subjectId, academic_year: '2026-27' });
+  // Twenty subjects waiting is twenty round trips if this only ever takes one, so it
+  // takes a list. One subject is the list of one, which is what the older callers send.
+  const asked: { yearGroup: string; subjectId: string }[] =
+    Array.isArray(body.subjects) ? body.subjects : [{ yearGroup, subjectId }];
 
-  await audit(user.id, 'registry.sign_off', 'curriculum_week', `${yearGroup}/${subjectId}`, { weeks: count });
-  return NextResponse.json({ ok: true, weeks: count });
+  const seen = new Set<string>();
+  const subjects = asked
+    .filter(s => s && s.yearGroup && s.subjectId)
+    .filter(s => {
+      const key = `${s.yearGroup}|${s.subjectId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, MAX_AT_ONCE);
+
+  if (!subjects.length) {
+    return NextResponse.json({ error: 'No subject named' }, { status: 400 });
+  }
+
+  // Sign-off is what opens generation for a subject (Addendum C section C7).
+  // It is a named human act, and it is logged as one - so a batch of twenty is
+  // twenty entries in the log, not one entry saying "twenty".
+  const at = new Date().toISOString();
+  let weeks = 0;
+  for (const s of subjects) {
+    const { count } = await db.from('curriculum_week')
+      .update({ signed_off_by: user.id, signed_off_at: at }, { count: 'exact' })
+      .match({ year_group: s.yearGroup, subject_id: s.subjectId, academic_year: '2026-27' });
+    weeks += count ?? 0;
+    await audit(user.id, 'registry.sign_off', 'curriculum_week',
+      `${s.yearGroup}/${s.subjectId}`, { weeks: count });
+  }
+
+  return NextResponse.json({ ok: true, signed: subjects.length, weeks });
 }

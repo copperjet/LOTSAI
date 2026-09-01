@@ -7,6 +7,33 @@ import { admin } from './supabase';
  */
 export const ADMIN_ROLES = ['admin', 'principal'];
 
+/** Every role app_user.role may hold (the check constraint in migration 0001).
+ *  A role a form offers that the database refuses is a 500 nobody can act on. */
+export const ROLES = ['teacher', 'hod', 'coordinator', 'principal', 'admin'];
+
+/** How a role reads on the page. The rail has its own copy for the same reason:
+ *  app_user.role is a database value, and neither screen should print one. */
+export const ROLE_SAYS: Record<string, string> = {
+  teacher: 'Teacher', hod: 'Head of Department', coordinator: 'Coordinator',
+  principal: 'Principal', admin: 'Administrator',
+};
+
+/**
+ * What went wrong with the last form, said plainly.
+ *
+ * The admin pages are server components with no JavaScript, so a refused action
+ * comes back as ?e= on the URL and is read from there. Silence would be worse
+ * than a message: a form that appears to work and did nothing is the one failure
+ * an administrator cannot investigate.
+ */
+export const PROBLEM_SAYS: Record<string, string> = {
+  missing: 'Something the form needed was blank.',
+  bad_email: 'That does not look like an email address.',
+  duplicate_email: 'Somebody already has that email address.',
+  bad_role: 'That is not a role this school has.',
+  self_role: 'You cannot change your own role. Ask another administrator.',
+};
+
 /**
  * Reads for the admin dashboard.
  *

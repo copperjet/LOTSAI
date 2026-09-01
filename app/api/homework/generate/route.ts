@@ -4,6 +4,7 @@ import * as engine from '@/lib/engine';
 import { homeworkWorkKey, type HomeworkContent, type RegistryWeekLite } from '@/lib/homework';
 import { storeArtefact } from '@/lib/pdf/store';
 import { viewUrl } from '@/lib/artefactUrl';
+import { dedupeObjectives } from '@/lib/planner';
 
 export const runtime = 'nodejs';
 export const maxDuration = 90;
@@ -65,7 +66,11 @@ export async function POST(req: NextRequest) {
   }).select('id').single();
 
   if (error || !hw) {
-    // Almost certainly migration 0015 not applied yet. Say which, rather than a code.
+    // Usually migration 0015 not applied yet, but not always - a work key that is
+    // already taken lands here too. The teacher gets the likely cause; the log gets
+    // the actual one, because "the database needs migration 0015" sent somebody to
+    // the SQL editor for a duplicate row once already.
+    console.error(`[homework] insert failed: ${error?.message ?? 'no row returned'}`);
     return NextResponse.json({
       error: 'not_ready',
       message: 'Homework is not switched on for this school yet. The database needs migration 0015.',
@@ -89,6 +94,7 @@ export async function POST(req: NextRequest) {
     marks: (content.sections ?? []).flatMap(s => s.questions ?? []).reduce((n, q) => n + (q.marks || 0), 0),
     minutes: content.duration_minutes,
     refs: content.objective_refs,
+    objectives: dedupeObjectives((content.sections ?? []).flatMap(s => s.objectives ?? [])),
     render,
   });
 }

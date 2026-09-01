@@ -54,6 +54,26 @@ export interface GeneratePackV2Input {
 const GROUP = 4;
 const MAX_PAGES = 40;
 
+/**
+ * Two content pages for each week the pack covers.
+ *
+ * The outline pass used to be told "between 6 and 40 pages" whatever the span was, so
+ * a two week pack and an eight week pack came back the same length - and a week's
+ * revision arrived as five sheets nobody would work through. A week is worth about two
+ * pages: one to remind, one to practise. The front page carrying the resources and the
+ * closing page sit outside the budget, because they belong to the pack rather than to
+ * any week.
+ *
+ * The document path has no weeks to count, so it keeps MAX_PAGES as its only ceiling.
+ */
+const PAGES_PER_WEEK = 2;
+
+function pageBudget(source: PackSource): number | null {
+  if (source.kind !== 'registry') return null;
+  const weeks = Math.max(1, source.weekTo - source.weekFrom + 1);
+  return Math.min(MAX_PAGES - 2, weeks * PAGES_PER_WEEK);
+}
+
 // ------------------------------------------------------------------- prompts
 
 const SYSTEM = `You build study packs for Lusaka Oaktree School, a Cambridge primary and lower-secondary
@@ -155,6 +175,7 @@ export async function generateStudyPackV2(
   input: GeneratePackV2Input, userId: string,
 ): Promise<{ content: PackV2; usage: { input: number; cached: number; output: number; cost: number } }> {
   const objectives = objectivesFor(input.source);
+  const budget = pageBudget(input.source);
   const grounding = groundingFor(input, objectives);
   const allowedUrls = input.source.kind === 'document' ? urlsIn(input.source.text) : new Set<string>();
 
@@ -171,13 +192,13 @@ export async function generateStudyPackV2(
     system: SYSTEM,
     cached: [BLOCK_GUIDE, grounding],
     longCache: true,
-    prompt: outlinePrompt(input),
+    prompt: outlinePrompt(input, budget),
     schema: OUTLINE_SCHEMA,
     maxTokens: 6000,
   });
   add(outlineCall.usage);
 
-  const outline = normaliseOutline(outlineCall.data, objectives.length, input.subjectId);
+  const outline = normaliseOutline(outlineCall.data, objectives.length, input.subjectId, budget);
   if (!outline.pages.length) throw new Error('studypack: the outline pass produced no pages');
 
   const outlineBlock = `PACK OUTLINE\n\n${outline.pages.map(p =>
@@ -309,7 +330,7 @@ function groundingFor(input: GeneratePackV2Input, objectives: PackObjective[]): 
   return lines.join('\n');
 }
 
-function outlinePrompt(input: GeneratePackV2Input): string {
+function outlinePrompt(input: GeneratePackV2Input, budget: number | null): string {
   const src = input.source;
   const what = src.kind === 'registry'
     ? `the curriculum weeks above (weeks ${src.weekFrom} to ${src.weekTo})`
@@ -331,8 +352,13 @@ a different one, and a page that does a different job from the pages around it -
 a source study, a reflection - is allowed to stand out. Never give two touching pages the
 same accent by accident.
 
-Give the pack a front page carrying its resources, and a closing page. Keep it between 6 and
-${MAX_PAGES} pages. Respect the page budget above: two to four blocks on an A4 landscape page,
+Give the pack a front page carrying its resources, and a closing page. ${budget
+  ? `Between them put exactly ${budget} content pages - ${PAGES_PER_WEEK} for each week of the span - `
+    + `so ${budget + 2} pages in all. That is the length of the document; do not exceed it. `
+    + `A week gets one page to remind and one to practise, and a topic that will not fit two `
+    + `pages is a topic to cover more tightly, not one to give a third page to.`
+  : `Keep it between 6 and ${MAX_PAGES} pages.`}
+Respect the page budget above: two to four blocks on an A4 landscape page,
 one to three on a slide, and another page rather than a crowded one. Return the outline only -
 the blocks are written next.`;
 }
@@ -353,12 +379,14 @@ function homeAccent(subjectId: string): Accent {
   return ACCENTS[n % ACCENTS.length];
 }
 
-function normaliseOutline(raw: PackOutline, objectiveCount: number, subjectId: string): PackOutline {
+function normaliseOutline(
+  raw: PackOutline, objectiveCount: number, subjectId: string, budget: number | null = null,
+): PackOutline {
   const layout: PackLayout = raw?.layout === 'slide-16x9' ? 'slide-16x9' : 'a4-landscape';
   const seen = new Set<string>();
   const home = homeAccent(subjectId);
   let previous: Accent | null = null;
-  const pages = (raw?.pages ?? []).slice(0, MAX_PAGES).map((p, i) => {
+  const pages = trimToBudget(raw?.pages ?? [], budget).slice(0, MAX_PAGES).map((p, i) => {
     // Ids address a page across two calls, so they must be unique and present.
     let id = String(p?.id ?? '').trim() || `p${i + 1}`;
     while (seen.has(id)) id = `${id}-${i}`;
@@ -395,6 +423,32 @@ function normaliseOutline(raw: PackOutline, objectiveCount: number, subjectId: s
     subtitle: raw?.subtitle ? String(raw.subtitle) : null,
     layout, pages,
   };
+}
+
+/**
+ * Hold the outline to its page budget, structurally.
+ *
+ * The prompt asks for the right number of pages and mostly gets it; this is what
+ * happens when it does not. A blind slice would cut the closing page and leave the
+ * pack ending mid-topic, so the front page and the closing page are kept and the
+ * surplus is taken from the content in the middle - the last content pages, which are
+ * the ones the model added past what it was asked for.
+ */
+function trimToBudget(pages: PackOutline['pages'], budget: number | null): PackOutline['pages'] {
+  if (!budget || pages.length <= budget + 2) return pages;
+
+  const closing = pages[pages.length - 1]?.block_types?.includes('closing')
+    ? pages[pages.length - 1] : null;
+  const front = pages[0];
+  const middle = pages.slice(1, closing ? pages.length - 1 : pages.length);
+  const kept = middle.slice(0, budget);
+
+  // Ids, not titles: a page title here is two objectives long, and twenty of them is
+  // a screen of log for one line of fact.
+  console.warn(`[studypack] outline came back ${pages.length} pages for a budget of ${budget + 2}; `
+    + `dropping ${middle.length - kept.length}: ${middle.slice(budget).map(p => p.id).join(', ')}`);
+
+  return [front, ...kept, ...(closing ? [closing] : [])];
 }
 
 /** Web addresses already present in the teacher's document, normalised for comparison. */

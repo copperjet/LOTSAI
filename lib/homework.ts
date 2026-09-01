@@ -83,10 +83,14 @@ objective - you only choose which of the supplied objectives each section addres
 
 Homework is not a worksheet. It is done alone, at home, without a teacher to explain it, so:
 - Every instruction must be followable by a learner of this age with nobody to ask.
-- Build the paper in three or four short sections, easiest first, so a learner who is struggling
-  still finishes something.
+- Build the paper in TWO short sections, easiest first, so a learner who is struggling still
+  finishes something.
+- Six to eight questions in the whole paper. Not per section - in total.
+- The paper prints on two sides of one sheet and it has to fit. A learner does not do more
+  homework because there is more of it on the page; they do less of it.
+- Set a duration of about thirty minutes.
 - Every question carries marks, and the marks add up to a sensible total for the time you set.
-- Give answer_lines: 1 or 2 for recall, 4 or more for anything that needs explaining or working.
+- Give answer_lines: 1 or 2 for recall, 4 to 6 for anything that needs explaining or working.
 - Give the expected answer for every question. It is for the teacher's key and is never printed
   with the paper.
 - Finish with a teacher_note saying what to reduce for a learner who cannot get started.
@@ -117,9 +121,26 @@ export interface HomeworkContent {
   objective_refs: string[];
 }
 
-/** Sensible bounds when the model gives a figure that would print badly. */
-const MAX_ANSWER_LINES = 12;
-const DEFAULT_DURATION = 45;
+/**
+ * The two-page rule, as numbers.
+ *
+ * A week's homework came back as seven printed pages: four sections, a brief page, a
+ * contents page and an answer key, each section given a sheet of its own. Nobody sets
+ * seven pages of homework for one week, so the prompt asks for two sections and the
+ * paper is trimmed to them here. The renderer draws one page per section, so two
+ * sections is two learner pages, and the answer key keeps its own sheet at the back
+ * because it never goes home with the learner.
+ */
+const MAX_SECTIONS = 2;
+const MAX_QUESTIONS = 8;
+const MAX_ANSWER_LINES = 6;
+const DEFAULT_DURATION = 30;
+
+/** Roughly what one printed page holds, matching the study pack's own page budget. */
+const WORDS_PER_PAGE = 450;
+/** A ruled answer line costs page height without costing words. */
+const WORDS_PER_LINE = 8;
+const LEARNER_PAGES = 2;
 
 export async function generateHomework(
   input: GenerateHomeworkInput, userId: string,
@@ -155,7 +176,7 @@ export async function generateHomework(
   });
 
   const seenRefs = new Set<string>();
-  const sections = (data.sections ?? []).map(sec => {
+  const sections = (data.sections ?? []).slice(0, MAX_SECTIONS).map(sec => {
     const objectives = (sec.objective_indexes ?? []).map(i => flat[i]).filter(Boolean);
     for (const o of objectives) if (o.ref) seenRefs.add(o.ref);
     return {
@@ -172,6 +193,8 @@ export async function generateHomework(
     };
   }).filter(sec => sec.questions.length);
 
+  trimToLength(sections);
+
   return {
     content: {
       title: data.title, intro: data.intro ?? '',
@@ -182,6 +205,54 @@ export async function generateHomework(
     },
     usage,
   };
+}
+
+/**
+ * Trim the paper to what two pages hold.
+ *
+ * Questions go from the end backwards - the last question of the last section first -
+ * because the paper is built easiest first, and a learner who runs out of time should
+ * lose the hardest question, not the one that got them started. A section emptied by
+ * the trim is dropped with it.
+ */
+function trimToLength(sections: HomeworkSection[]): void {
+  let total = sections.reduce((n, s) => n + s.questions.length, 0);
+  for (let i = sections.length - 1; i >= 0 && total > MAX_QUESTIONS; i--) {
+    // Never take a section's last question while another section still has spare.
+    while (sections[i].questions.length > 1 && total > MAX_QUESTIONS) {
+      sections[i].questions.pop();
+      total--;
+    }
+  }
+  while (total > MAX_QUESTIONS && sections.length > 1) {
+    const last = sections[sections.length - 1];
+    last.questions.pop();
+    total--;
+    if (!last.questions.length) sections.pop();
+  }
+}
+
+/**
+ * How much page the paper asks for, in words.
+ *
+ * Everything a learner reads, plus the ruled space left for them to write in, which
+ * costs height without costing words. Used by the gate to say when a paper will not
+ * fit the two sides it is printed on.
+ */
+export function homeworkExtent(content: HomeworkContent): { words: number; lines: number; pages: number } {
+  const words = (t: string) => String(t ?? '').split(/\s+/).filter(Boolean).length;
+  const sections = content.sections ?? [];
+  let n = words(content.intro);
+  let lines = 0;
+  for (const sec of sections) {
+    n += words(sec.heading) + words(sec.instructions);
+    for (const q of sec.questions ?? []) {
+      n += words(q.text);
+      lines += q.answer_lines || 0;
+    }
+  }
+  const total = n + lines * WORDS_PER_LINE;
+  return { words: n, lines, pages: total / WORDS_PER_PAGE };
 }
 
 /** The renderer numbers questions itself, so a model that also numbers its own text
@@ -276,6 +347,19 @@ export async function gateHomework(homeworkId: string) {
         detail: `${untagged} section(s) not tagged to the registry.` }
     : { id: 'objectives', status: 'pass', title: 'Every section addresses a registry objective',
         detail: `${content.objective_refs?.length ?? 0} references.` });
+
+  // The two-page rule. A warning, not a block: a paper that runs a little long is
+  // still a usable paper, and the teacher is the one who knows the class.
+  const extent = homeworkExtent(content);
+  // How many questions the overflow is worth, at what this paper's questions cost.
+  const perQuestion = Math.max(1, (extent.words + extent.lines * WORDS_PER_LINE) / Math.max(1, questions.length));
+  const over = Math.ceil(((extent.pages - LEARNER_PAGES) * WORDS_PER_PAGE) / perQuestion);
+  checks.push(extent.pages <= LEARNER_PAGES
+    ? { id: 'length', status: 'pass', title: 'The homework fits two pages',
+        detail: `${questions.length} questions across ${sections.length} section(s), ${extent.lines} ruled lines.` }
+    : { id: 'length', status: 'warn', title: 'The homework runs past two pages',
+        detail: `About ${extent.pages.toFixed(1)} pages of learner-facing content. Cutting roughly `
+          + `${Math.max(1, over)} question(s) or some answer space would bring it back.` });
 
   checks.push(content.duration_minutes > 0
     ? { id: 'duration', status: 'pass', title: 'The homework states how long it should take',

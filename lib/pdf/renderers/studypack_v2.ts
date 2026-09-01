@@ -84,7 +84,9 @@ function label(ctx: DocCtx, cur: Cursor, text: string): void {
 export async function renderPackPdfV2(
   pack: PackV2, meta: { subject: string; yearGroup: string; weeks: string },
 ): Promise<Uint8Array> {
-  const title = `Study Pack - ${pack.title}`;
+  // Homework and worksheets are composed as packs too, so the document says what it
+  // actually is rather than calling every one of them a study pack.
+  const title = `${pack.kind ?? 'Study Pack'} - ${pack.title}`;
   const ctx = await newDoc();
   const cur = new Cursor(ctx);
 
