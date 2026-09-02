@@ -31,6 +31,31 @@ is, three things degrade rather than fail, on purpose:
 - a study pack PDF that fell back to the plain pdf-lib rendering cannot say so.
 Paste `supabase/migrations/0015_threads_homework.sql` into the SQL editor to switch them on.
 
+**0016 (`school_fact`) is applied and verified end to end** (2026-09-02). It holds what the school
+knows about itself that no other table does - the uniform policy, the safeguarding lead, how work
+is marked - and `lib/ask.ts` puts it in the grounding block beside the calendar, so a teacher asks
+in the one place they already ask everything else.
+
+`POST /api/school-fact` is `admin`/`principal` only and answers 404 to everyone else. It is always
+two steps: `action: 'read'` (pasted text, or a .pdf/.docx/photograph) returns candidate
+`{topic, body}` pairs and writes **nothing**; `action: 'commit'` writes the ones an administrator
+kept, one `audit_log` row each; `action: 'retire'` soft-deletes via `retired_at`, and a retired
+fact stops being served on the next question. The table is deliberately small - tens of rows, all
+of them in the cached prefix - so there is no embedding or retrieval step, and none is wanted until
+it reaches the hundreds.
+
+The one rule to keep: **a fact with a home is read from its home.** "Mrs Banda heads Science" does
+not belong in `school_fact` - `app_user` holds it and `/admin/people` maintains it. The extraction
+prompt already refuses facts about named individuals' roles for exactly this reason.
+
+**Staff and classes are now in the grounding block** (`lib/ask.ts`), so "who is the HOD for X",
+"who teaches CP4 Maths" and "what does this subject sit under" answer from `app_user`, `klass` and
+`subject.department` - live, never a written-down copy. One thing to know: `app_user.department`
+and `subject.department` are free text on two different vocabularies right now - staff are in
+`Primary`, subjects are in `Mathematics`/`Science`/`English`/`Humanities` - so **no subject
+resolves to an HOD**. The model says so rather than guessing, which is right but not useful.
+Align the two vocabularies at `/admin/people` to switch that on; no code change is needed.
+
 ## Environment / gotchas (READ FIRST)
 
 - **Real calls**: the Browser preview tool forces `MOCK_LLM=1`. To run real OpenAI, start the
@@ -38,10 +63,10 @@ Paste `supabase/migrations/0015_threads_homework.sql` into the SQL editor to swi
   `.env.local` normally holds `MOCK_CLAUDE=1` (fixtures, free) — restore it when done.
 - **Migrations are manual**: no DB password locally, so DDL runs in the Supabase SQL editor. The
   seed and routes tolerate a missing table (degrade cleanly) so nothing breaks pre-migration.
-- **Site password**: in `SITE_PASSWORD` in `.env.local`, and nowhere else. It used to be written
-  out in this file; it is a live production credential and should be rotated, since it has been
-  in the repository. POST it to `/api/gate` (form-encoded, `next=/`) for the gate cookie.
-- **Sign-in**: past the gate there is now a personal PIN per member of staff (`/signin`). The
+- **Site password**: removed. The shared school gate (`SITE_PASSWORD`, `lib/sitegate.ts`,
+  `app/gate/`, `app/api/gate/`) is deleted; `/signin` is the only door. The old password was a
+  live credential that sat in this repository, so drop it from Vercel and `.env.local` too.
+- **Sign-in**: a personal PIN per member of staff (`/signin`). The
   demo user switcher is gone — `POST /api/whoami` let anyone become anyone, which is why nothing
   in `ai_usage` or `audit_log` from before migration 0011 names a real person. Locally,
   `DEMO_USER_EMAIL` still stands in for a session so `npm run dev` and the seed keep working;

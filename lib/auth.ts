@@ -1,22 +1,23 @@
 /**
- * Personal sign-in: a PIN per member of staff, behind the shared school
- * password.
+ * Personal sign-in: a PIN per member of staff. The only door.
  *
  * Web Crypto only, so this runs unchanged on the edge and in a route handler,
- * and adds no dependency — the same discipline as lib/sitegate.ts. bcrypt and
+ * and adds no dependency. bcrypt and
  * argon2 are both better password hashes than PBKDF2 and both are native
  * modules; on Vercel's edge runtime neither is available, and a native module
  * that only loads in one of two runtimes is a worse problem than a slightly
  * older KDF.
  *
- * A four-digit PIN is weak on its own and is not asked to stand on its own.
- * Three things carry it:
+ * A four-digit PIN is weak against guessing, and since the shared school
+ * password was removed it is the first door as well as the only one. Two
+ * things carry it:
  *
- *   1. the school password in front of it, so the PIN is never the first door
- *   2. lockout after LOCK_AFTER wrong tries, which is what actually stops
+ *   1. lockout after LOCK_AFTER wrong tries, which is what actually stops
  *      guessing when the keyspace is 10,000
- *   3. a session token with real entropy, so the PIN is used once per device
+ *   2. a session token with real entropy, so the PIN is used once per device
  *      per month rather than on every request
+ *
+ * Staff who choose 6 to 8 digits are meaningfully safer than those who choose 4.
  */
 
 export const SESSION_COOKIE = 'lots_session';

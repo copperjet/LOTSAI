@@ -1,21 +1,21 @@
 import { admin } from '@/lib/supabase';
 import { CREST } from '@/lib/crest';
-import Sprout from '../gate/Sprout';
+import Sprout from './Sprout';
 
 /**
- * The second door: who are you, personally.
+ * The door: who are you, personally.
  *
- * The school password says the visitor belongs to the school. This says which
- * member of staff they are, which is what makes ai_usage.user_id and
- * audit_log.actor_id mean anything.
+ * This says which member of staff you are, which is what makes ai_usage.user_id
+ * and audit_log.actor_id mean anything.
  *
  * A name from a list plus a PIN, rather than an email and a password: two of
  * sixteen staff rate themselves Beginner on computer literacy, and picking your
  * own name off a list is the shortest path there is. The list is names only —
- * no email addresses — and it is behind the school password, so it tells a
- * stranger nothing they could not read on a classroom door.
+ * no email addresses, no PINs — so it tells a stranger nothing they could not
+ * read on a classroom door.
  *
- * A plain form, no client JavaScript, like the gate.
+ * A plain form, no client JavaScript, so it works on a slow phone on school
+ * wifi.
  */
 export default async function SignIn({ searchParams }: {
   searchParams: Promise<{ e?: string; next?: string; who?: string }>;

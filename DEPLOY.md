@@ -68,7 +68,6 @@ Set these for **Production** (and Preview, if previews should work):
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | from Supabase → API |
 | `SUPABASE_SERVICE_ROLE_KEY` | from Supabase → API. Server-only; never prefixed `NEXT_PUBLIC_`. |
 | `DEMO_USER_EMAIL` | the seeded user every visitor is signed in as, e.g. the teacher account |
-| `SITE_PASSWORD` | the shared password for the whole site. See below. |
 | `LLM_PROVIDER` | `openai`. Unset or `anthropic` uses Anthropic. |
 | `OPENAI_API_KEY` | from platform.openai.com. Server-only. |
 | `MOCK_LLM` | `1` to stay on fixtures; unset to make real calls. `MOCK_CLAUDE` is the old name, still honoured. |
@@ -76,7 +75,6 @@ Set these for **Production** (and Preview, if previews should work):
 | `OPENAI_MODEL_SMALL` / `_STANDARD` / `_LARGE` | optional per-tier overrides |
 
 ```bash
-vercel env add SITE_PASSWORD production
 vercel env add NEXT_PUBLIC_SUPABASE_URL production
 vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production
 vercel env add SUPABASE_SERVICE_ROLE_KEY production
@@ -107,33 +105,27 @@ To move the site to a different hostname later, `vercel domains add <host>` in t
 and certificate are created for you within a minute or two. The same hostname cannot serve two
 projects, so detach it from the old one first.
 
-## The password gate
+## The door
 
-v1 has no sign-in. `currentUser()` in `lib/supabase.ts` reads `DEMO_USER_EMAIL`, so **everyone who
-reaches the site is the same user**. On a public URL that would mean anyone who finds it can read
-every planner and spend AI credits, so `middleware.ts` puts one shared password in front of
-everything — pages and API routes alike.
+There is one door: a personal sign-in. `middleware.ts` requires a session cookie for everything —
+pages and API routes alike — and sends anyone without one to `/signin`, where they pick their name
+and enter their PIN. Only the cookie's presence is checked at the edge; `currentUser()` in
+`lib/supabase.ts` settles whether the token is real, unexpired and attached to an active person.
 
-It **fails closed**: a production deployment with no `SITE_PASSWORD` serves the gate and nothing
-else. Forgetting the variable locks the door rather than opening it.
+The shared school password that used to stand in front of this is gone: `SITE_PASSWORD`,
+`lib/sitegate.ts`, `app/gate/` and `app/api/gate/` were removed once every member of staff had
+their own PIN. `/signin` is now the first page a stranger reaches, and it lists staff names — no
+email addresses, no PINs.
 
-Locally, with no `SITE_PASSWORD` set, the gate stands aside so `npm run dev` is unchanged.
-
-To test it the way production runs it:
-
-```bash
-SITE_PASSWORD=something npx next start
-```
-
-The whole mechanism is `middleware.ts`, `lib/sitegate.ts`, `app/gate/page.tsx` and
-`app/api/gate/route.ts`. When Google Workspace SSO is switched on, delete those four files.
+Locally, `DEMO_USER_EMAIL` still stands in for a session so `npm run dev` and the seed scripts keep
+working. In production it does not.
 
 ## Checks after the first deploy
 
-1. `https://lotsai.dennysepiso.com` redirects to `/gate`.
-2. A wrong password is refused; the right one lets you through and stays through a reload.
+1. `https://lotsai.dennysepiso.com` redirects to `/signin`.
+2. A wrong PIN is refused; the right one lets you through and stays through a reload.
 3. `curl -s -o /dev/null -w '%{http_code}' https://lotsai.dennysepiso.com/api/agenda` is `307`, not
-   `200` — the API is behind the gate too.
+   `200` — the API is behind the sign-in too.
 4. Signed in, the agenda loads and the today box lists the week's work.
 5. Plan a week, edit a methodology cell, reload: the edit persisted, and `select count(*) from
    edit_event;` in Supabase is 1.
