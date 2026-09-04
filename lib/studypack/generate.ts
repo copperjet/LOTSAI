@@ -24,11 +24,12 @@
 import { call } from '@/lib/llm';
 import type { Objective } from '@/lib/planner';
 import {
-  BLOCK_TYPES, OUTLINE_SCHEMA, fillSchema,
+  BLOCK_TYPES, OUTLINE_BLOCK_TYPES, OUTLINE_SCHEMA, fillSchema,
   type Accent, type Block, type BlockType, type PackLayout, type PackObjective,
-  type PackOutline, type PackV2, type Page,
+  type PackOutline, type PackV2, type Page, type PageRole,
 } from './schema';
 import { ACCENTS } from './schema';
+import { pickTheme } from './themes';
 
 export interface RegistryWeekLite {
   week_number: number; topic_label: string; objectives: Objective[];
@@ -131,6 +132,16 @@ think           One open question that goes beyond recall, and optionally a name
 reflection      An extended written response, its marks, and self-check statements.
 contents        A contents page. Emit it empty - it is built from the page list.
 closing         A short closing page: a heading and a few study tips.
+diagram         A drawn explanation, composed as data: "flow" for steps joined by arrows,
+                "cycle" for a repeating process, "number_line" for from/to/step with marks
+                called out, "bar_model" for parts of a whole, "grid" for headers with cells
+                filled in order. Fill only the fields the kind uses and leave the rest null
+                or empty. Reach for it where a sentence is doing a picture's work.
+
+A key_notes card may carry "tile": one letter or a very short token, drawn as a coloured
+square beside the heading. Use it where the cards are a named sequence a learner has to
+hold in order - B O D M A S, the layers of something, steps 1 to 5 - and leave it null
+everywhere else. A tile on every card is a tile on none.
 
 WIDTH
 
@@ -207,8 +218,11 @@ export async function generateStudyPackV2(
 
   // ---- pass 2: the blocks, a few pages at a time ----------------------------
   const filled = new Map<string, Block[]>();
-  for (let i = 0; i < outline.pages.length; i += GROUP) {
-    const group = outline.pages.slice(i, i + GROUP);
+  // Dividers carry no blocks, so they are not sent to the fill pass at all - a page
+  // asked for with an empty block list is a call that can only come back empty.
+  const toFill = outline.pages.filter(p => p.role !== 'divider' && p.block_types.length);
+  for (let i = 0; i < toFill.length; i += GROUP) {
+    const group = toFill.slice(i, i + GROUP);
     const types = [...new Set(group.flatMap(p => p.block_types))];
 
     const want = group.map(p =>
@@ -254,7 +268,7 @@ export async function generateStudyPackV2(
 
   const pages: Page[] = outline.pages.map(p => ({
     id: p.id, eyebrow: p.eyebrow, title: p.title,
-    objective_indexes: p.objective_indexes, accent: p.accent,
+    objective_indexes: p.objective_indexes, accent: p.accent, role: p.role,
     blocks: filled.get(p.id) ?? [],
   }));
 
@@ -267,6 +281,7 @@ export async function generateStudyPackV2(
     content: {
       version: 2,
       layout: outline.layout,
+      theme: pickTheme(input.subjectId, themeSeed(input)).id,
       title: outline.title,
       subtitle: outline.subtitle,
       meta: {
@@ -346,11 +361,18 @@ attempt.
 Choose the layout: "a4-landscape" for a document a student works through with a pen, or
 "slide-16x9" for a topic-by-topic deck.
 
-Give each page an accent colour from ${ACCENTS.join(', ')}. Colour carries the pack's
-structure, so use it: a run of pages on one topic shares an accent and the next topic takes
-a different one, and a page that does a different job from the pages around it - a review,
-a source study, a reflection - is allowed to stand out. Never give two touching pages the
-same accent by accident.
+Give each page an accent from ${ACCENTS.join(', ')}. These are the five slots of the pack's
+palette, not colours you are choosing - the pack's own theme decides what each one looks
+like. What you are deciding is structure: a run of pages on one topic shares a slot and the
+next topic takes a different one, and a page that does a different job from the pages around
+it - a review, a source study, a reflection - is allowed to stand out. Never give two
+touching pages the same slot by accident.
+
+Give each page a "role". Almost every page is "content". A "divider" is a title page that
+opens a topic: it carries its title and nothing else, printed full-bleed in its accent, and
+its block_types must be empty. Use one before each major topic in a pack long enough to
+need finding your way around - four or more topics - and none at all in a short pack. A
+divider does not count against the page budget below.
 
 Give the pack a front page carrying its resources, and a closing page. ${budget
   ? `Between them put exactly ${budget} content pages - ${PAGES_PER_WEEK} for each week of the span - `
@@ -373,6 +395,20 @@ the blocks are written next.`;
  * gives maths its colour and Global Perspectives another, every time, without anyone
  * maintaining a table of them.
  */
+/**
+ * What decides which theme a pack wears.
+ *
+ * The subject fixes the family (lib/studypack/themes.ts); this moves within it, so
+ * the next pack a teacher builds for the same class does not look like the last one.
+ * It is the pack's identity rather than a random number, so a pack re-rendered next
+ * term is the pack they remember: same span, same file, same look.
+ */
+function themeSeed(input: GeneratePackV2Input): string {
+  const src = input.source;
+  const span = src.kind === 'registry' ? `w${src.weekFrom}-${src.weekTo}` : src.filename;
+  return `${input.subjectId}|${input.yearGroup}|${span}`;
+}
+
 function homeAccent(subjectId: string): Accent {
   let n = 0;
   for (const ch of subjectId.toUpperCase()) n = (n * 31 + ch.charCodeAt(0)) % 9973;
@@ -399,10 +435,15 @@ function normaliseOutline(
       : ACCENTS[(ACCENTS.indexOf(home) + i) % ACCENTS.length];
     if (accent === previous) accent = ACCENTS[(ACCENTS.indexOf(accent) + 1) % ACCENTS.length];
     previous = accent;
+    // A divider is a title and nothing else. Anything the model put on one is
+    // dropped rather than drawn small: a divider that carries blocks is just a
+    // content page with a very short heading, which is not what it is for.
+    const role: PageRole = p?.role === 'divider' ? 'divider' : 'content';
     return {
       id,
       eyebrow: p?.eyebrow ? String(p.eyebrow) : null,
       title: String(p?.title ?? `Page ${i + 1}`),
+      role,
       // An index outside the supplied list is the one way a pack could cite an
       // objective that does not exist. Drop it rather than resolve it to undefined.
       objective_indexes: [...new Set((p?.objective_indexes ?? [])
@@ -413,8 +454,8 @@ function normaliseOutline(
       // objectives and no crest - which is exactly what the Reference Guide's
       // "branding on every page" rule forbids. The prompt asks for two to four; this
       // is what happens when it is not listened to.
-      block_types: (p?.block_types ?? [])
-        .filter((t): t is BlockType => (BLOCK_TYPES as readonly string[]).includes(t))
+      block_types: role === 'divider' ? [] : (p?.block_types ?? [])
+        .filter((t): t is BlockType => (OUTLINE_BLOCK_TYPES as readonly string[]).includes(t))
         .slice(0, layout === 'slide-16x9' ? 3 : 4),
     };
   });
@@ -435,18 +476,31 @@ function normaliseOutline(
  * the ones the model added past what it was asked for.
  */
 function trimToBudget(pages: PackOutline['pages'], budget: number | null): PackOutline['pages'] {
-  if (!budget || pages.length <= budget + 2) return pages;
+  // Dividers are furniture, not content: a pack that earned four of them would
+  // otherwise lose four of the pages they were there to introduce.
+  const content = pages.filter(p => p?.role !== 'divider').length;
+  if (!budget || content <= budget + 2) return pages;
 
   const closing = pages[pages.length - 1]?.block_types?.includes('closing')
     ? pages[pages.length - 1] : null;
   const front = pages[0];
   const middle = pages.slice(1, closing ? pages.length - 1 : pages.length);
-  const kept = middle.slice(0, budget);
+  // Count only content towards the budget, but carry the dividers that sit among the
+  // pages that survive - a divider whose topic was dropped goes with it.
+  const kept: PackOutline['pages'] = [];
+  let n = 0;
+  for (const p of middle) {
+    if (p?.role === 'divider') { kept.push(p); continue; }
+    if (n >= budget) continue;
+    kept.push(p); n++;
+  }
+  while (kept.length && kept[kept.length - 1]?.role === 'divider') kept.pop();
 
   // Ids, not titles: a page title here is two objectives long, and twenty of them is
   // a screen of log for one line of fact.
-  console.warn(`[studypack] outline came back ${pages.length} pages for a budget of ${budget + 2}; `
-    + `dropping ${middle.length - kept.length}: ${middle.slice(budget).map(p => p.id).join(', ')}`);
+  const dropped = middle.filter(p => !kept.includes(p));
+  console.warn(`[studypack] outline came back ${content} content pages for a budget of ${budget + 2}; `
+    + `dropping ${dropped.length}: ${dropped.map(p => p.id).join(', ')}`);
 
   return [front, ...kept, ...(closing ? [closing] : [])];
 }
@@ -503,6 +557,7 @@ const CAP = {
   resourceGroups: 3, resourceItems: 3, notes: 6, workedExamples: 2, practice: 10,
   quiz: 5, glossary: 8, checklistColumns: 3, checklistItems: 6, sources: 2,
   tableRows: 8, chartSeries: 8, asideItems: 5, selfCheck: 4, closingTips: 4,
+  diagramNodes: 8,
 } as const;
 
 /**
@@ -513,7 +568,9 @@ const CAP = {
  * block type: a block that cannot be drawn coherently is dropped, not rendered
  * half-formed.
  */
-export function repairBlocks(blocks: Block[], allowedUrls: Set<string>): Block[] {
+export function repairBlocks(
+  blocks: Block[], allowedUrls: Set<string>, allowedAssets?: Set<string>,
+): Block[] {
   const out: Block[] = [];
   for (const b of blocks ?? []) {
     if (!b || typeof b !== 'object' || !(BLOCK_TYPES as readonly string[]).includes(b.type)) continue;
@@ -532,7 +589,12 @@ export function repairBlocks(blocks: Block[], allowedUrls: Set<string>): Block[]
       }
       case 'key_notes': {
         const cards = (b.cards ?? []).filter(c => c?.heading || c?.body).slice(0, CAP.notes)
-          .map(c => ({ heading: String(c.heading ?? ''), body: String(c.body ?? '') }));
+          .map(c => ({
+            heading: String(c.heading ?? ''), body: String(c.body ?? ''),
+            // One or two characters. A "tile" holding a whole word is a heading in a
+            // 30px square, which draws as three letters and an overflow.
+            tile: c.tile ? String(c.tile).trim().slice(0, 2) || null : null,
+          }));
         if (cards.length) out.push({ ...b, columns: b.columns === 3 ? 3 : 2, cards });
         break;
       }
@@ -638,6 +700,45 @@ export function repairBlocks(blocks: Block[], allowedUrls: Set<string>): Block[]
       case 'contents':
         out.push(b);
         break;
+      case 'diagram': {
+        const kinds = ['flow', 'cycle', 'number_line', 'bar_model', 'grid'];
+        const kind = kinds.includes(b.kind) ? b.kind : 'flow';
+        const nodes = (b.nodes ?? []).filter(n => n?.label)
+          .map(n => ({ label: String(n.label), note: n.note ? String(n.note) : null }))
+          .slice(0, CAP.diagramNodes);
+        const parts = (b.parts ?? [])
+          .filter(x => x?.label != null && Number.isFinite(Number(x.value)) && Number(x.value) > 0)
+          .map(x => ({ label: String(x.label), value: Number(x.value) })).slice(0, CAP.diagramNodes);
+        const marks = (b.marks ?? [])
+          .filter(m => m?.label != null && Number.isFinite(Number(m.at)))
+          .map(m => ({ at: Number(m.at), label: String(m.label) })).slice(0, CAP.diagramNodes);
+        // A shape with nothing in it draws nothing, so it is dropped here rather
+        // than leaving an empty figure and its caption on the page.
+        const usable = kind === 'number_line'
+          ? Number.isFinite(Number(b.from)) && Number.isFinite(Number(b.to)) && Number(b.to) > Number(b.from)
+          : kind === 'bar_model' ? parts.length > 0 : nodes.length > 0;
+        if (usable) {
+          out.push({
+            ...b, kind, nodes, parts, marks,
+            headers: (b.headers ?? []).map(String).filter(Boolean).slice(0, 6),
+            from: Number.isFinite(Number(b.from)) ? Number(b.from) : null,
+            to: Number.isFinite(Number(b.to)) ? Number(b.to) : null,
+            step: Number.isFinite(Number(b.step)) ? Number(b.step) : null,
+          });
+        }
+        break;
+      }
+      case 'image': {
+        // An id nothing holds is dropped here, not at render time. A model asked to
+        // put a picture on a page will name one whether or not it was given an id,
+        // and a stored block pointing at nothing is a promise the pack cannot keep.
+        const id = String(b.asset_id ?? '');
+        const alt = String(b.alt ?? '').trim();
+        if (id && alt && (!allowedAssets || allowedAssets.has(id))) {
+          out.push({ ...b, asset_id: id, alt, caption: b.caption ? String(b.caption) : null });
+        }
+        break;
+      }
     }
   }
   return settleSpans(out.map(deIndex));
@@ -758,7 +859,10 @@ function deIndex<T extends Block>(b: T): T {
       ...q,
       ...(typeof q?.text === 'string' ? { text: one(q.text) } : {}),
       ...(typeof q?.q === 'string' ? { q: one(q.q) } : {}),
-      ...(Array.isArray(q?.options) ? { options: many(q.options) } : {}),
+      // Positional, not filtered: `correct` is an index into this array, and an
+      // option dropped for coming back empty moves every option after it, so the
+      // quiz then marks the wrong answer right.
+      ...(Array.isArray(q?.options) ? { options: (q.options as unknown[]).map(one) } : {}),
       ...(typeof q?.explain === 'string' ? { explain: one(q.explain) } : {}),
     }));
   }
@@ -834,6 +938,13 @@ function stripTags(text: string): string {
     )
     // Bracketless and label-less too: one pack introduced its practice questions with
     // the bare list "0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16".
-    .replace(/^[\d,\s]+$/, "")
+    //
+    // Three numbers at least. As /^[\d,\s]+$/ this erased every value in the pack that
+    // was a number and nothing else: a worked example answering "1482", a quiz offering
+    // "5", "6", "7", a table cell of figures. The maths packs printed ANSWER over an
+    // empty bar and quizzes with options missing - and because the emptied options were
+    // then filtered out, the index of the correct one moved. A list of objective
+    // indices is never one or two numbers; an answer very often is.
+    .replace(/^\s*\d{1,3}(?:\s*,\s*\d{1,3}){2,}\s*$/, "")
     .trim();
 }

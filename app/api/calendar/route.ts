@@ -34,18 +34,25 @@ export async function GET() {
   // they have (Addendum C section C7), and the picker should say so rather than
   // offering a week that will be refused.
   const { data: reg } = await db.from('curriculum_week')
-    .select('week_number, subject_id, year_group, signed_off_at, topic_label')
+    .select('week_number, semester, subject_id, year_group, signed_off_at, topic_label')
     .eq('academic_year', '2026-27');
 
-  const signed = new Set((reg ?? []).filter(r => r.signed_off_at)
-    .map(r => `${r.year_group}:${r.subject_id}:${r.week_number}`));
-  const topics = new Map((reg ?? []).map(r => [`${r.year_group}:${r.subject_id}:${r.week_number}`, r.topic_label]));
+  // Keyed by semester as well as week number, because both semesters have a week 1.
+  // Until the calendar carried semester 2 that was theoretical; it is not any more, and
+  // a key without it would show semester 2 week 3 the topic of semester 1 week 3.
+  const key = (yearGroup: string, subject: string, semester: number, week: number) =>
+    `${yearGroup}:${subject}:${semester}:${week}`;
 
-  const byWeekId = new Map((weeks ?? []).map(w => [w.id, w.week_number]));
+  const signed = new Set((reg ?? []).filter(r => r.signed_off_at)
+    .map(r => key(r.year_group, r.subject_id, r.semester, r.week_number)));
+  const topics = new Map((reg ?? []).map(r =>
+    [key(r.year_group, r.subject_id, r.semester, r.week_number), r.topic_label]));
+
+  const byWeekId = new Map((weeks ?? []).map(w => [w.id, w]));
   const status: Record<string, string> = {};
   for (const p of planners ?? []) {
-    const wn = byWeekId.get(p.school_week);
-    if (wn != null) status[`${p.class_id}:${wn}`] = p.status;
+    const w = byWeekId.get(p.school_week);
+    if (w) status[`${p.class_id}:${w.semester}:${w.week_number}`] = p.status;
   }
 
   return NextResponse.json({
@@ -55,10 +62,11 @@ export async function GET() {
       ...k,
       weeks: (weeks ?? []).filter(w => w.week_type === 'teaching').map(w => ({
         weekNumber: w.week_number,
+        semester: w.semester,
         weekCommencing: w.week_commencing,
-        status: status[`${k.id}:${w.week_number}`] ?? null,
-        signedOff: signed.has(`${k.year_group}:${k.subject_id}:${w.week_number}`),
-        topic: topics.get(`${k.year_group}:${k.subject_id}:${w.week_number}`) ?? null,
+        status: status[`${k.id}:${w.semester}:${w.week_number}`] ?? null,
+        signedOff: signed.has(key(k.year_group, k.subject_id, w.semester, w.week_number)),
+        topic: topics.get(key(k.year_group, k.subject_id, w.semester, w.week_number)) ?? null,
       })),
     })),
   });

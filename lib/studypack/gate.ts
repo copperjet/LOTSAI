@@ -47,7 +47,10 @@ export async function gateStudyPackV2(studyPackId: string) {
     ? { id: 'pages', status: 'pass', title: 'The pack has pages', detail: `${pages.length} pages, ${allBlocks.length} blocks.` }
     : { id: 'pages', status: 'block', title: 'The pack has no pages', detail: 'Nothing was generated.' });
 
-  const empty = pages.filter(p => !blocksOf(p).length);
+  // A divider is a title on a full-bleed field and carries no blocks on purpose
+  // (lib/studypack/schema.ts, PageRole). It is the one page that is right to be
+  // empty, and counting it as an unfilled page blocked every pack that had one.
+  const empty = pages.filter(p => p.role !== 'divider' && !blocksOf(p).length);
   if (empty.length) {
     checks.push({
       id: 'empty_pages', status: 'block', title: 'A page has no content',
@@ -66,7 +69,8 @@ export async function gateStudyPackV2(studyPackId: string) {
   );
 
   // 3. Objectives: stated on every content page, and never invented.
-  const contentPages = pages.filter(p => blocksOf(p).some(b => !FRONT_MATTER.has(b.type)));
+  const contentPages = pages.filter(p =>
+    p.role !== 'divider' && blocksOf(p).some(b => !FRONT_MATTER.has(b.type)));
   const unstated = contentPages.filter(p => !(p.objective_indexes?.length));
   checks.push(unstated.length
     ? { id: 'objectives', status: 'warn', title: 'A page states no objective', detail: `${unstated.length} of ${contentPages.length} content pages: ${unstated.map(p => p.title).join(', ')}.` }

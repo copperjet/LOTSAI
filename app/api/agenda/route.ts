@@ -108,7 +108,10 @@ export async function GET() {
         lead: `Week ${nextWeek.week_number} for ${firstUnplanned.name} is due Friday`,
         also: `Week ${nextWeek.week_number} is also due Friday`,
         act: 'Start it', q: 'Shall I start it?', alt: `Plan Week ${nextWeek.week_number} first`,
-        intent: 'plan', payload: { classId: firstUnplanned.id, weekNumber: nextWeek.week_number },
+        // The semester travels with the week number, because both semesters have a
+        // week 1 and the registry is keyed on the pair.
+        intent: 'plan',
+        payload: { classId: firstUnplanned.id, weekNumber: nextWeek.week_number, semester: nextWeek.semester },
         title: `${firstUnplanned.name} - Week ${nextWeek.week_number} planner`,
         note: 'Not started. Due Friday, before the week begins.', when: 'Due Fri',
       });
@@ -126,7 +129,7 @@ export async function GET() {
               : 'Submitted for review',
           done: !!status && DONE_STATUSES.includes(status),
           intent: 'plan',
-          payload: { classId: k.id, weekNumber: nextWeek.week_number },
+          payload: { classId: k.id, weekNumber: nextWeek.week_number, semester: nextWeek.semester },
         });
       }
     }

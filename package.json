@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "ingest": "python scripts/ingest_overviews.py \"../CURRICULUM OVERVIEWS\" --year 2026-27",
     "seed": "node --env-file=.env.local scripts/seed.mjs",
+    "calendar": "node --env-file=.env.local scripts/load_calendar.mjs",
     "repair:objectives": "node --env-file=.env.local scripts/repair_objectives.mjs"
   },
   "dependencies": {
@@ -23,12 +24,12 @@
     "pdfjs-dist": "^4.7.76",
     "puppeteer-core": "^25.9.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/react": "^19.1.0",
-    "sharp": "^0.35.4",
     "typescript": "^5.7.0"
   }
 }

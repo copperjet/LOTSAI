@@ -37,7 +37,9 @@ const HAIRLINE = rgb(0.85, 0.85, 0.86);
 const CONTENT_W = A4.width - Margins.left - Margins.right;
 const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
 
-export async function renderStudyPackPdf(studyPackId: string): Promise<Uint8Array> {
+export async function renderStudyPackPdf(
+  studyPackId: string, opts: { plain?: boolean } = {},
+): Promise<Uint8Array> {
   const db = admin();
   const { data: pack } = await db.from('study_pack')
     .select('content, subject_id, year_group, week_from, week_to').eq('id', studyPackId).single();
@@ -48,7 +50,7 @@ export async function renderStudyPackPdf(studyPackId: string): Promise<Uint8Arra
     weeks: `${pack.week_from}-${pack.week_to}`,
   };
   if (Number((pack.content as { version?: unknown })?.version) === 2) {
-    return renderPackPdfV2(pack.content as PackV2, meta);
+    return renderPackPdfV2(pack.content as PackV2, meta, opts);
   }
 
   const content = pack.content as PackContent;

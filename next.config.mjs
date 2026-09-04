@@ -26,6 +26,21 @@ export default {
   // while working locally, where the whole of node_modules is on disk. Naming the
   // file here is what puts it next to pdf.mjs in the deployment.
   outputFileTracingIncludes: {
+    // The same failure, on the browser print. @sparticuz/chromium is external, which
+    // is necessary and was not sufficient: it unpacks chromium.br from its own bin/
+    // directory at run time by a path it builds itself, and a path nothing imports is
+    // a path the tracer cannot see. So bin/ was never copied into the lambda, every
+    // print in production died with
+    //   The input directory "/var/task/node_modules/@sparticuz/chromium/bin" does not exist
+    // and every teacher got the plain pdf-lib fallback instead of the designed pack
+    // (lib/pdf/renderers/studypack_print.ts). It worked locally, where a real Chrome
+    // is found on disk and the package is never asked for its binary at all.
+    //
+    // Every route that can reach printHtmlToPdf needs it: a study pack or homework
+    // renders its PDF on demand, and again on approval, on the way to Drive.
+    '/api/studypack/pdf': ['./node_modules/@sparticuz/chromium/bin/**'],
+    '/api/studypack/approve': ['./node_modules/@sparticuz/chromium/bin/**'],
+    '/api/homework/approve': ['./node_modules/@sparticuz/chromium/bin/**'],
     '/api/ingest/upload': [
       './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
       // mammoth resolves its own files the same way, and a .docx upload has never

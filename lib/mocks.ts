@@ -193,12 +193,34 @@ export function mockOcr() {
  * that decline. The other two kinds are one field apart and are covered by
  * asking for real.
  */
+/**
+ * A picture, without a picture model.
+ *
+ * A 2x2 grey PNG, which is enough for every path a real image takes - stored in the
+ * bucket, read back, inlined as a data URI, laid out on a page and printed - without
+ * a key, a network call or a cent. It is visibly a placeholder, which is the point:
+ * nobody should mistake a fixture for a drawing.
+ */
+export function mockImage(): Uint8Array {
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGN89'
+    + 'uwZAxJgYkAFRPMB6vsD/f8xtEUAAAAASUVORK5CYII=';
+  return new Uint8Array(Buffer.from(PNG, 'base64'));
+}
+
 export function mockAsk(prompt: string) {
   const q = (prompt.split('THE QUESTION:')[1] ?? prompt).trim();
   return {
     kind: 'records',
-    answer: `The school opens on Monday 24 August 2026, the first teaching week of Semester 1. `
-      + `(Fixture answer, standing in for: ${q.slice(0, 80)})`,
+    answer: 'Weeks 1 to 3 of CP4 English cover reading and responding to fiction, then '
+      + 'text types and word study, then reading non-fiction for evidence.',
+    // The fixture carries points so the structured reply is exercised locally: the
+    // failure this replaced was a wall of prose no interface could lay out.
+    points: [
+      { label: 'Week 1', text: 'Read and explore a range of fiction genres, poems and playscripts (4Ri.02), and read aloud with accuracy and fluency (4SLp.02).' },
+      { label: 'Week 2', text: 'Tell fiction from non-fiction and locate books by classification (4Ri.01), and explore words with common roots (4Rv.02).' },
+      { label: 'Week 3', text: 'Use context to suggest synonyms for unfamiliar words (4Rv.01), and answer questions with reference to single points in a text (4Ri.15).' },
+      { label: null, text: `Fixture answer, standing in for: ${q.slice(0, 80)}` },
+    ],
   };
 }
 
@@ -233,21 +255,31 @@ export function mockPackOutline(cached: string) {
   const pages = [
     {
       id: 'front', eyebrow: 'BEFORE YOU START', title: 'Helpful resources',
-      objective_indexes: [] as number[], accent: 'forest',
+      objective_indexes: [] as number[], accent: 'forest', role: 'content',
       block_types: ['resources', 'key_ideas'],
     },
     // Two pages per topic, as the real packs do: notes and a worked example, then
     // the questions. One page carrying all five blocks overflows its sheet and prints
     // a headless continuation page, so the fixture keeps to the same page budget the
     // generator's prompt asks for (lib/studypack/generate.ts, HOW MUCH FITS ON A PAGE).
+    // A divider before each topic, so the fixture exercises the page role the real
+    // outline chooses (lib/studypack/schema.ts, PageRole).
     ...groups.flatMap((g, i) => [
+      {
+        id: `topic${i + 1}-divider`,
+        eyebrow: `TOPIC ${i + 1}`,
+        title: g[0]?.label ?? `Topic ${i + 1}`,
+        objective_indexes: [] as number[],
+        accent: ['purple', 'teal', 'blue', 'gold'][i % 4],
+        role: 'divider', block_types: [] as string[],
+      },
       {
         id: `topic${i + 1}`,
         eyebrow: `SECTION ${String.fromCharCode(65 + i)}`,
         title: g[0]?.label ?? `Topic ${i + 1}`,
         objective_indexes: g.map(o => o.index),
         accent: ['purple', 'teal', 'blue', 'gold'][i % 4],
-        block_types: ['key_notes', 'worked_example'],
+        role: 'content', block_types: ['key_notes', 'worked_example'],
       },
       {
         id: `topic${i + 1}-practice`,
@@ -255,12 +287,12 @@ export function mockPackOutline(cached: string) {
         title: `${g[0]?.label ?? `Topic ${i + 1}`}: your turn`,
         objective_indexes: g.map(o => o.index),
         accent: ['purple', 'teal', 'blue', 'gold'][i % 4],
-        block_types: ['practice', 'quiz', 'think'],
+        role: 'content', block_types: ['practice', 'quiz', 'think'],
       },
     ]),
     {
       id: 'revision', eyebrow: 'REVISION', title: 'Glossary and reflection',
-      objective_indexes: [] as number[], accent: 'blue',
+      objective_indexes: [] as number[], accent: 'blue', role: 'content',
       block_types: ['glossary', 'reflection', 'closing'],
     },
   ];
@@ -288,11 +320,13 @@ function mockBlock(type: string, title: string): unknown {
         { label: 'PRACTICE', items: [{ name: 'The exercises in your textbook', why: 'More of the same questions, with answers at the back.', url: null }] },
       ] };
     case 'key_notes':
+      // Tiles on all four, so the fixture shows the lettered-card treatment; a real
+      // pack uses them only where the cards are a named sequence.
       return { type: 'key_notes', columns: 2, cards: [
-        { heading: 'What it means', body: `${title} in one sentence, in plain words.` },
-        { heading: 'How to start', body: 'Read the question twice before writing anything down.' },
-        { heading: 'A common slip', body: 'Check the units before you give the answer.' },
-        { heading: 'Show your working', body: 'Write each step on its own line so a mistake is easy to find.' },
+        { heading: 'What it means', tile: '1', body: `${title} in one sentence, in plain words.` },
+        { heading: 'How to start', tile: '2', body: 'Read the question twice before writing anything down.' },
+        { heading: 'A common slip', tile: '3', body: 'Check the units before you give the answer.' },
+        { heading: 'Show your working', tile: '4', body: 'Write each step on its own line so a mistake is easy to find.' },
       ] };
     case 'key_ideas':
       return { type: 'key_ideas', items: [
@@ -344,6 +378,16 @@ function mockBlock(type: string, title: string): unknown {
     case 'reflection':
       return { type: 'reflection', prompt: 'What was hardest in this unit, and what will you do about it?', marks: 10,
         self_check: ['I named one thing I found hard', 'I said what I will do next'] };
+    case 'diagram':
+      return { type: 'diagram', kind: 'flow', title: `How to work through ${title}`, caption: null,
+        nodes: [
+          { label: 'Read the question', note: 'twice' },
+          { label: 'Pick the method', note: null },
+          { label: 'Work it through', note: 'one step a line' },
+          { label: 'Check the answer', note: 'units' },
+        ],
+        headers: [] as string[], from: null, to: null, step: null,
+        marks: [] as { at: number; label: string }[], parts: [] as { label: string; value: number }[] };
     case 'contents':
       return { type: 'contents', heading: 'Contents' };
     case 'closing':
@@ -392,6 +436,81 @@ export function mockHomework(cached: string) {
   };
 }
 
+/**
+ * A school document, separated into the facts it states.
+ *
+ * The fixture reads the document rather than ignoring it: paragraphs become entries,
+ * so the same text pasted twice produces the same facts and /admin/knowledge's
+ * duplicate detection is exercised locally rather than only in production.
+ */
+export function mockSchoolFacts(prompt: string) {
+  const source = prompt.split('Document:')[1] ?? prompt;
+  const paras = source.split(/\n\s*\n/).map(p => p.replace(/\s+/g, ' ').trim())
+    .filter(p => p.length > 40 && !/^Separate it into/i.test(p));
+
+  const facts = paras.slice(0, 8).map(p => {
+    // A heading where the paragraph has one ("Uniform: ..."), else its opening words -
+    // roughly what the live model does with an unheaded policy.
+    const headed = p.match(/^([A-Z][A-Za-z ]{2,28}?)\s*[:.-]\s+(.+)$/);
+    const topic = headed ? headed[1].trim() : p.split(' ').slice(0, 3).join(' ');
+    return { topic, body: headed ? headed[2].trim() : p };
+  });
+
+  return { facts };
+}
+
+/**
+ * A revision, without a model.
+ *
+ * Reads the pack out of the cached block exactly as the real call receives it
+ * (lib/studypack/revise.ts, packBlock), picks the page the instruction names - or the
+ * first content page if it names none - and changes it visibly. Visibly is the point:
+ * a fixture that returned the page unchanged would exercise every line of the route
+ * and prove nothing about whether a change reaches the document.
+ */
+export function mockPackRevise(cached: string, prompt: string) {
+  const pages: { n: number; id: string; blocks: unknown[] }[] = [];
+  const lines = cached.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const head = lines[i].match(/^--- page (\d+) \| id: (\S+) \|/);
+    if (!head) continue;
+    // The blocks are the next line that parses as an array; `objectives:` sits between.
+    for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+      if (!lines[j].startsWith('[')) continue;
+      try { pages.push({ n: +head[1], id: head[2], blocks: JSON.parse(lines[j]) }); } catch { /* not it */ }
+      break;
+    }
+  }
+
+  const wanted = prompt.match(/page (\d+)/i);
+  const page = (wanted && pages.find(x => x.n === +wanted[1]))
+    ?? pages.find(x => x.blocks.length)
+    ?? pages[0];
+
+  if (!page) return { pages: [], note: 'There was nothing in that pack to change.' };
+
+  const asked = (prompt.split('THE TEACHER ASKS:')[1] ?? prompt).split('\n')[0].trim();
+  const assetId = cached.match(/^ {2}([0-9a-f-]{36}) - /m)?.[1];
+
+  return {
+    pages: [{
+      id: page.id,
+      blocks: [
+        ...page.blocks,
+        // A picture, when the pack holds one - the "include this on page 8" path.
+        ...(assetId && /image|picture|photo|include this|draw|illustrat/i.test(asked)
+          ? [{ type: 'image', span: 'full', asset_id: assetId, alt: 'A picture the teacher added', caption: asked.slice(0, 80) }]
+          : []),
+        {
+          type: 'callout', span: 'full', tone: 'note', heading: 'Changed',
+          body: `Fixture revision, standing in for: ${asked.slice(0, 120)}`,
+        },
+      ],
+    }],
+    note: `I changed page ${page.n}. (Fixture revision.)`,
+  };
+}
+
 /** Routed on CallOpts.workflow. Anything unknown gets an empty object. */
 export function mockFor(workflow: string, cached: string, prompt: string): unknown {
   if (workflow === 'planner_create' || workflow === 'planner_adapt') return mockPlan(cached, prompt);
@@ -400,9 +519,11 @@ export function mockFor(workflow: string, cached: string, prompt: string): unkno
   if (workflow === 'studypack_create') return mockPack(cached);
   if (workflow === 'studypack_outline') return mockPackOutline(cached);
   if (workflow === 'studypack_fill') return mockPackFill(prompt);
+  if (workflow === 'studypack_revise') return mockPackRevise(cached, prompt);
   if (workflow === 'studypack_outcomes') return mockOutcomes(prompt);
   if (workflow === 'worksheet_create') return mockWorksheet(cached);
   if (workflow === 'homework_create') return mockHomework(cached);
+  if (workflow === 'school_fact_read') return mockSchoolFacts(prompt);
   // Plain text, not JSON: the OCR call has no schema, so lib/llm.ts returns
   // whatever the fixture is verbatim.
   if (workflow === 'ocr_extract') return mockOcr();

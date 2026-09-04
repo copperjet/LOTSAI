@@ -16,6 +16,7 @@ import { admin } from '@/lib/supabase';
 import { renderPackHtml, footerTemplate } from '@/lib/studypack/render_html';
 import { renderStudyPackHtml } from '@/lib/studypack_html';
 import { printHtmlToPdf } from '@/lib/pdf/browser';
+import { loadAssets } from '@/lib/studypack/assets';
 import { renderStudyPackPdf } from './studypack';
 import type { PackV2 } from '@/lib/studypack/schema';
 import type { PackContent } from '@/lib/studypack';
@@ -29,7 +30,7 @@ export async function renderStudyPackPrint(studyPackId: string): Promise<Uint8Ar
   const content = pack.content as Partial<PackV2>;
   const v2 = Number(content?.version) === 2;
   const html = v2
-    ? renderPackHtml(content as PackV2, { paged: true })
+    ? renderPackHtml(content as PackV2, { paged: true, assets: await loadAssets(studyPackId) })
     : renderStudyPackHtml(pack.content as PackContent, {
         subject: pack.subject_id, yearGroup: pack.year_group,
         weekFrom: pack.week_from, weekTo: pack.week_to,
@@ -44,7 +45,7 @@ export async function renderStudyPackPrint(studyPackId: string): Promise<Uint8Ar
     const why = e instanceof Error ? e.message : String(e);
     console.error(`[studypack-pdf] browser print failed, falling back to pdf-lib: ${why}`);
     await note(studyPackId, why);
-    return renderStudyPackPdf(studyPackId);
+    return renderStudyPackPdf(studyPackId, { plain: true });
   }
 }
 

@@ -2,7 +2,8 @@
  * Seeds a Supabase project from the school's own ingested overviews.
  *
  *   npm run ingest     # reads ../CURRICULUM OVERVIEWS -> supabase/seed/curriculum.json
- *   npm run seed       # loads calendar, people, classes and that curriculum
+ *   npm run calendar   # loads supabase/seed/calendar.json -> school_week, school_date
+ *   npm run seed       # loads people, classes and that curriculum (calendar included)
  *
  * Only subjects whose registry a HOD has signed off can be planned. This script
  * signs off exactly one — CP4 Mathematics, the one overview that actually carries
@@ -16,17 +17,18 @@ const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABA
   auth: { persistSession: false },
 });
 
-const YEAR = '2026-27';
-
-// Semester 1 2026/27. Mondays, from the school calendar (Addendum A section A9):
-// 11 teaching weeks, then revision, then two examination weeks.
-const WEEKS = [
-  [1, '2026-08-24', 'teaching'], [2, '2026-08-31', 'teaching'], [3, '2026-09-07', 'teaching'],
-  [4, '2026-09-14', 'teaching'], [5, '2026-09-21', 'teaching'], [6, '2026-09-28', 'teaching'],
-  [7, '2026-10-05', 'teaching'], [8, '2026-10-12', 'teaching'], [9, '2026-10-19', 'break'],
-  [10, '2026-10-26', 'teaching'], [11, '2026-11-02', 'teaching'], [12, '2026-11-09', 'teaching'],
-  [13, '2026-11-16', 'revision'], [14, '2026-11-23', 'exam'], [15, '2026-11-30', 'exam'],
-];
+/**
+ * The calendar, read rather than restated.
+ *
+ * This file used to hold its own list of Mondays, and scripts/ingest_overviews.py held a
+ * second one. They disagreed from the midterm break onward - the seed counted the break
+ * as week 9, the ingest skipped it - so a week number in an overview meant one date to
+ * the importer and another to the app. Both now read supabase/seed/calendar.json, which
+ * is transcribed from the calendar the school publishes and is the only copy.
+ */
+const calendar = JSON.parse(
+  readFileSync(new URL('../supabase/seed/calendar.json', import.meta.url), 'utf8'));
+const YEAR = calendar.academic_year;
 
 const SUBJECTS = [
   ['MATH', 'Mathematics', 'Mathematics'],
@@ -64,6 +66,10 @@ const INVENTORY = [
   ['SCI', 'CP4', "Cambridge Primary Science Learner's Book 4"],
 ];
 
+/** How many weeks a semester has, from the calendar rather than from memory. */
+const semesterWeeks = (semester) =>
+  calendar.weeks.filter(w => w.semester === semester).length;
+
 const ok = (label) => ({ error }) => {
   if (error) { console.error(`  x ${label}: ${error.message}`); process.exitCode = 1; }
   else console.log(`  ok ${label}`);
@@ -73,12 +79,27 @@ async function main() {
   console.log('seeding', process.env.NEXT_PUBLIC_SUPABASE_URL);
 
   await db.from('academic_year')
-    .upsert({ id: YEAR, starts_on: '2026-08-24', ends_on: '2027-07-02' }).then(ok('academic year'));
+    .upsert({ id: YEAR, starts_on: calendar.starts_on, ends_on: calendar.ends_on })
+    .then(ok('academic year'));
 
   await db.from('school_week').upsert(
-    WEEKS.map(([n, mon, type]) => ({
-      academic_year: YEAR, semester: 1, week_number: n, week_commencing: mon, week_type: type,
-    })), { onConflict: 'academic_year,semester,week_number' }).then(ok('school weeks'));
+    calendar.weeks.map(w => ({
+      academic_year: YEAR, semester: w.semester, week_number: w.week,
+      week_commencing: w.commencing, week_type: w.type, note: w.note ?? null,
+    })), { onConflict: 'academic_year,semester,week_number' })
+    .then(ok(`school weeks (${calendar.weeks.length}, both semesters)`));
+
+  // The dates that are not weeks - examination windows, conferences, holidays. Their
+  // table arrives with migration 0018, which is applied by hand like the rest, so a
+  // project without it seeds everything else and says which one is missing.
+  const { error: dateError } = await db.from('school_date').upsert(
+    (calendar.dates ?? []).map(d => ({
+      academic_year: YEAR, starts_on: d.starts_on, ends_on: d.ends_on ?? null,
+      kind: d.kind, label: d.label, note: d.note ?? null,
+    })), { onConflict: 'academic_year,starts_on,label' });
+  console.log(dateError
+    ? `  ! calendar dates not loaded (apply 0018_calendar.sql): ${dateError.message}`
+    : `  . calendar dates (${(calendar.dates ?? []).length})`);
 
   await db.from('subject')
     .upsert(SUBJECTS.map(([id, name, dept]) => ({ id, name, department: dept }))).then(ok('subjects'));
@@ -116,7 +137,9 @@ async function main() {
   const known = new Set(SUBJECTS.map(s => s[0]));
   const weeks = rows
     .filter(r => r.semester === 1 && SUBJECT_BY_NAME[r.subject] && known.has(SUBJECT_BY_NAME[r.subject]))
-    .filter(r => r.week <= 15)
+    // A week number the calendar does not have is not a week. The bound was 15 written
+    // out, which was Semester 1's length and is now a fact about the calendar file.
+    .filter(r => r.week <= semesterWeeks(1))
     .map(r => ({
       academic_year: YEAR,
       year_group: r.year_group,

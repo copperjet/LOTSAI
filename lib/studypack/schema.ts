@@ -44,16 +44,34 @@ export interface PackObjective {
 export const BLOCK_TYPES = [
   'resources', 'key_notes', 'key_ideas', 'worked_example', 'practice', 'quiz',
   'glossary', 'checklist', 'source_card', 'table', 'chart', 'two_column',
-  'callout', 'think', 'reflection', 'contents', 'closing',
+  'callout', 'think', 'reflection', 'contents', 'closing', 'diagram', 'image',
 ] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
+
+/**
+ * What the outline pass may choose from.
+ *
+ * `image` is missing on purpose. A picture belongs to a pack only once a teacher has
+ * handed one over or asked for one to be drawn (app/api/studypack/revise), and a
+ * generation pass offered `image` would plan a page around a file that does not
+ * exist. Every other block type is composed from the objectives and the teacher's
+ * own material, so the model may plan with all of them.
+ */
+export const OUTLINE_BLOCK_TYPES = BLOCK_TYPES.filter(t => t !== 'image');
 
 export interface ResourcesBlock {
   type: 'resources'; intro: string | null;
   groups: { label: string; items: { name: string; why: string; url: string | null }[] }[];
 }
 export interface KeyNotesBlock {
-  type: 'key_notes'; columns: number; cards: { heading: string; body: string }[];
+  type: 'key_notes'; columns: number;
+  /**
+   * `tile` is a letter or a very short token drawn as a coloured square beside the
+   * heading, as the BODMAS column of "CP5 Mathematic StudyPack 1.pdf" does. It is
+   * what turns a list of six cards into something a learner can find their place in.
+   * Null on a card that is only a heading and a note.
+   */
+  cards: { heading: string; body: string; tile?: string | null }[];
 }
 export interface KeyIdeasBlock { type: 'key_ideas'; items: string[] }
 export interface WorkedExampleBlock {
@@ -99,6 +117,53 @@ export interface ContentsBlock { type: 'contents'; heading: string | null }
 export interface ClosingBlock { type: 'closing'; heading: string; tips: string[] }
 
 /**
+ * A drawn explanation.
+ *
+ * Asked for an illustration, the honest answer for teaching material is usually a
+ * diagram rather than a picture: a number line, a bar model, a place-value grid, the
+ * steps of a process. Those are structure, and structure can be composed as data and
+ * drawn as SVG - which prints at any size, never gets a label wrong, and costs
+ * nothing. `chart` already works this way (renderChart); this is the same idea for
+ * the shapes a chart cannot make.
+ *
+ * A picture that genuinely has to be a picture is an `image` block instead.
+ *
+ * Fields not used by a kind are null or empty: strict structured output requires
+ * every property, so a shape is chosen by `kind` and the rest is left blank.
+ *   flow        - `nodes` in order, joined left to right by arrows
+ *   cycle       - `nodes` around a ring
+ *   number_line - `from`/`to`/`step`, with `marks` called out on it
+ *   bar_model   - `parts`, drawn to width as a proportion of their total
+ *   grid        - `headers` across the top, `nodes` filling the cells in order
+ */
+export interface DiagramBlock {
+  type: 'diagram';
+  kind: 'flow' | 'cycle' | 'number_line' | 'bar_model' | 'grid';
+  title: string | null;
+  caption: string | null;
+  nodes: { label: string; note: string | null }[];
+  headers: string[];
+  from: number | null; to: number | null; step: number | null;
+  marks: { at: number; label: string }[];
+  parts: { label: string; value: number }[];
+}
+
+/**
+ * A picture the teacher put in the pack, or asked to have drawn.
+ *
+ * `asset_id` addresses a row in `study_pack_asset`; the renderer inlines its bytes as
+ * a data URI, because the document has to stay self-contained for the headless print
+ * and `/api/document/view` is behind sign-in. An id the store does not hold renders
+ * as nothing rather than as a broken image.
+ *
+ * `alt` is not optional. A pack is read by children, printed, and sometimes read
+ * aloud; a picture nobody can describe is a picture doing no teaching.
+ */
+export interface ImageBlock {
+  type: 'image'; asset_id: string; alt: string; caption: string | null;
+}
+
+/**
  * How much of the page's width a block takes.
  *
  * Everything used to run the full width, so a two-line callout and a ten-question drill
@@ -112,6 +177,7 @@ export type Block = (
   | ResourcesBlock | KeyNotesBlock | KeyIdeasBlock | WorkedExampleBlock | PracticeBlock
   | QuizBlock | GlossaryBlock | ChecklistBlock | SourceCardBlock | TableBlock | ChartBlock
   | TwoColumnBlock | CalloutBlock | ThinkBlock | ReflectionBlock | ContentsBlock | ClosingBlock
+  | DiagramBlock | ImageBlock
 ) & { span?: BlockSpan };
 
 // --------------------------------------------------------------------- pages
@@ -119,12 +185,23 @@ export type Block = (
 export type Accent = 'forest' | 'purple' | 'teal' | 'blue' | 'gold';
 export const ACCENTS: Accent[] = ['forest', 'purple', 'teal', 'blue', 'gold'];
 
+/**
+ * What a page is for.
+ *
+ * A 'divider' carries a title and nothing else, printed full-bleed in its accent -
+ * the "Section 1: Calculations" sheet both of the school's own packs open each topic
+ * with. It is what makes a fifteen page document navigable at arm's length. Absent
+ * means an ordinary content page, so every pack stored before this reads unchanged.
+ */
+export type PageRole = 'content' | 'divider';
+
 export interface Page {
   id: string;
   eyebrow: string | null;          // "SECTION A - OBJECTIVE 9E.01" / "Topic 7 - Probability"
   title: string;
   objective_indexes: number[];
   accent: Accent;
+  role?: PageRole;
   blocks: Block[];
 }
 
@@ -141,6 +218,14 @@ export interface PackV2 {
    * Optional, and it defaults to Study Pack, so nothing stored before this changes.
    */
   kind?: string;
+  /**
+   * Which of `lib/studypack/themes.ts` this pack wears. Chosen once, at generation,
+   * from the subject and the pack's own key, and stored - so a pack looks the same
+   * every time it is opened, and the next pack for the same class does not look like
+   * it. Absent means the original forest-and-gold design, which is what every pack
+   * stored before themes existed still renders as.
+   */
+  theme?: string;
   title: string;
   subtitle: string | null;
   meta: { subject: string; yearGroup: string; curriculum: string | null; span: string | null };
@@ -153,7 +238,7 @@ export interface PackV2 {
 /** The outline pass: page skeletons plus the block types each page will carry. */
 export interface OutlinePage {
   id: string; eyebrow: string | null; title: string;
-  objective_indexes: number[]; accent: Accent; block_types: BlockType[];
+  objective_indexes: number[]; accent: Accent; role: PageRole; block_types: BlockType[];
 }
 export interface PackOutline {
   title: string; subtitle: string | null; layout: PackLayout; pages: OutlinePage[];
@@ -175,6 +260,7 @@ const nstr: JSchema = { type: ['string', 'null'] };
 const int: JSchema = { type: 'integer' };
 const nint: JSchema = { type: ['integer', 'null'] };
 const num: JSchema = { type: 'number' };
+const nnum: JSchema = { type: ['number', 'null'] };
 const arr = (items: JSchema): JSchema => ({ type: 'array', items });
 const lit = (v: string): JSchema => ({ type: 'string', enum: [v] });
 
@@ -190,7 +276,7 @@ const BLOCK_SCHEMA: Record<BlockType, JSchema> = {
   }),
   key_notes: obj({
     type: lit('key_notes'), columns: { type: 'integer', enum: [2, 3] },
-    cards: arr(obj({ heading: str, body: str })),
+    cards: arr(obj({ heading: str, body: str, tile: nstr })),
   }),
   key_ideas: obj({ type: lit('key_ideas'), items: arr(str) }),
   worked_example: obj({
@@ -234,6 +320,17 @@ const BLOCK_SCHEMA: Record<BlockType, JSchema> = {
   reflection: obj({ type: lit('reflection'), prompt: str, marks: nint, self_check: arr(str) }),
   contents: obj({ type: lit('contents'), heading: nstr }),
   closing: obj({ type: lit('closing'), heading: str, tips: arr(str) }),
+  diagram: obj({
+    type: lit('diagram'),
+    kind: { type: 'string', enum: ['flow', 'cycle', 'number_line', 'bar_model', 'grid'] },
+    title: nstr, caption: nstr,
+    nodes: arr(obj({ label: str, note: nstr })),
+    headers: arr(str),
+    from: nnum, to: nnum, step: nnum,
+    marks: arr(obj({ at: num, label: str })),
+    parts: arr(obj({ label: str, value: num })),
+  }),
+  image: obj({ type: lit('image'), asset_id: str, alt: str, caption: nstr }),
 };
 
 /** Width is asked of every block type, so it is added to each schema rather than
@@ -257,7 +354,8 @@ export const OUTLINE_SCHEMA: JSchema = obj({
     id: str, eyebrow: nstr, title: str,
     objective_indexes: arr(int),
     accent: { type: 'string', enum: ACCENTS },
-    block_types: arr({ type: 'string', enum: [...BLOCK_TYPES] }),
+    role: { type: 'string', enum: ['content', 'divider'] },
+    block_types: arr({ type: 'string', enum: [...OUTLINE_BLOCK_TYPES] }),
   })),
 });
 

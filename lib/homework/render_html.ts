@@ -17,6 +17,7 @@
  */
 import { renderPackHtml } from '@/lib/studypack/render_html';
 import type { Block, PackObjective, PackV2, Page } from '@/lib/studypack/schema';
+import { pickTheme } from '@/lib/studypack/themes';
 import type { HomeworkContent } from '@/lib/homework';
 
 export interface HomeworkMeta {
@@ -138,6 +139,10 @@ export function homeworkPack(content: HomeworkContent, meta: HomeworkMeta): Pack
     version: 2,
     layout: 'a4-landscape',
     kind: 'Homework',
+    // The same theme lookup the study pack uses, so a class's homework and its packs
+    // are recognisably the same subject. The week is the seed rather than a span, so
+    // two weeks of homework are not the same paper twice.
+    theme: pickTheme(meta.subject, `${meta.subject}|${meta.yearGroup}|w${meta.weekNumber}`).id,
     title: content.title,
     subtitle: `Homework - ${content.duration_minutes} minutes${marks ? `, ${marks} marks` : ''}`,
     meta: {

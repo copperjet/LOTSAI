@@ -18,6 +18,7 @@
  */
 import { CREST } from '../crest';
 import type { Block, PackV2, Page } from './schema';
+import { fontHref, themeById, type Theme } from './themes';
 
 /** Long dashes to a plain hyphen - the school writes with hyphens, and a model
  *  produces em dashes however firmly its prompt asks it not to. The PDF side does
@@ -32,6 +33,18 @@ const json = (v: unknown) =>
   JSON.stringify(v).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
 
 const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+/**
+ * The five accent names, as slot numbers.
+ *
+ * `Accent` is what the model chooses from and what every stored pack holds, and it
+ * still reads 'forest' or 'gold'. What those look like belongs to the pack's theme
+ * (lib/studypack/themes.ts), so the document does not carry the old colour names into
+ * its markup - a navy pack whose class said `accent-forest` would be a trap for the
+ * next person to read the stylesheet.
+ */
+const SLOT: Record<string, number> = { forest: 1, purple: 2, teal: 3, blue: 4, gold: 5 };
+const slotClass = (accent: string) => `accent-${SLOT[accent] ?? 1}`;
 
 /**
  * The cover lists every objective. It is the page the Reference Guide asks for, and
@@ -68,6 +81,16 @@ interface QuizQ { q: string; options: string[]; correct: number; explain: string
 
 export interface RenderOpts {
   /**
+   * Pictures this pack holds, as `asset_id` to a `data:` URI.
+   *
+   * Inlined rather than linked because the document has to stay self-contained: the
+   * headless print (lib/pdf/browser.ts) has no session, and /api/document/view is
+   * behind sign-in, so a plain URL would print as a blank rectangle. The crest is
+   * carried the same way (lib/crest.ts). An image block whose id is missing here
+   * draws nothing.
+   */
+  assets?: Record<string, string>;
+  /**
    * Draw the cover sheet. A study pack wants one - it is where the Reference Guide
    * puts the full objective list. A homework does not: it is a two page paper a
    * learner writes on, and a cover would be half of what they were handed.
@@ -97,6 +120,7 @@ export function footerTemplate(pack: PackV2): string {
 }
 
 export function renderPackHtml(pack: PackV2, opts: RenderOpts = {}): string {
+  const theme = themeById(pack.theme);
   const size = SIZES[pack.layout] ?? SIZES['a4-landscape'];
   const paged = opts.paged === true;
   const cover = opts.cover !== false;
@@ -141,14 +165,14 @@ export function renderPackHtml(pack: PackV2, opts: RenderOpts = {}): string {
         });
         return { html: renderQuiz(id, printed), half: block.span === 'half' };
       }
-      return { html: renderBlock(block, pack), half: block.span === 'half' };
+      return { html: renderBlock(block, pack, opts), half: block.span === 'half' };
     }).filter(d => d.html);
 
     const body = pairUp(drawn);
 
     return sheet({
-      pack, index: pi, total, accent: page.accent, paged,
-      eyebrow: page.eyebrow, title: page.title,
+      pack, theme, index: pi, total, accent: page.accent, paged,
+      eyebrow: page.eyebrow, title: page.title, role: page.role,
       objectives: objectives.map(o => ({ ref: o.ref, text: o.text })),
       body, cover,
     });
@@ -156,7 +180,7 @@ export function renderPackHtml(pack: PackV2, opts: RenderOpts = {}): string {
 
   const keySheet = answerKey.length
     ? sheet({
-      pack, index: total - 1, total, accent: 'gold', paged,
+      pack, theme, index: total - 1, total, accent: 'gold', paged,
       eyebrow: 'FOR THE TEACHER', title: 'Answer key',
       objectives: [], cover,
       body: `<div class="answer-key">${answerKey.map(a =>
@@ -177,9 +201,9 @@ export function renderPackHtml(pack: PackV2, opts: RenderOpts = {}): string {
 <title>${esc(pack.title)} - LOTS ${esc(pack.kind ?? 'Study Pack')}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="${fontHref(theme)}" rel="stylesheet">
 <style>
-${css(size, paged, slackMm)}
+${css(size, paged, slackMm, theme)}
 </style>
 </head>
 <body${paged ? ' class="paged"' : ''}>
@@ -188,7 +212,7 @@ ${css(size, paged, slackMm)}
   <button onclick="__packPrepare();window.print()">Print / Save as PDF</button>
 </div>
 <div class="deck">
-${cover ? coverSheet(pack, total) : ''}
+${cover ? coverSheet(pack, total, theme) : ''}
 ${sheets}
 ${keySheet}
 </div>
@@ -240,10 +264,11 @@ function pairUp(blocks: { html: string; half: boolean }[]): string {
  * from the pack's own meta and objective list rather than asked of the model - there is
  * nothing on it a model could add, and one less page for it to get wrong.
  */
-function coverSheet(pack: PackV2, total: number): string {
+function coverSheet(pack: PackV2, total: number, theme: Theme): string {
   const meta = [pack.meta.yearGroup, pack.meta.subject].filter(Boolean).join(' ');
   const lines = [pack.meta.curriculum, pack.meta.span].filter(Boolean) as string[];
-  return `<section class="sheet cover accent-forest">
+  return `<section class="sheet cover cover-${theme.cover} accent-1">
+  ${coverField(theme)}
   <div class="cover-body">
     <img class="crest" src="${CREST}" alt="Lusaka Oaktree School">
     <div class="cover-eyebrow">Lusaka Oaktree School &middot; ${esc(pack.kind ?? 'Study Pack')}</div>
@@ -264,17 +289,69 @@ function coverSheet(pack: PackV2, total: number): string {
 </section>`;
 }
 
+/**
+ * The decoration behind the cover, per theme.
+ *
+ * Both of the school's packs put something behind the title - a pale circle bleeding
+ * off the corner, a stripe down the edge, a band across the foot - and it is most of
+ * what makes one of them a different document from the other. It is drawn as empty
+ * divs rather than as ::before and ::after so a theme can have three of them, and it
+ * is decorative, so it carries nothing to read.
+ */
+function coverField(theme: Theme): string {
+  switch (theme.cover) {
+    case 'orbit':
+      return `<i class="cf orb a"></i><i class="cf orb b"></i><i class="cf orb c"></i>`;
+    case 'band':
+      return `<i class="cf band"></i><i class="cf orb a"></i>`;
+    case 'split':
+      return `<i class="cf split"></i><i class="cf edge"></i>`;
+    case 'rule':
+      return `<i class="cf edge"></i>`;
+    case 'panel':
+    default:
+      return `<i class="cf orb a"></i>`;
+  }
+}
+
+/**
+ * A topic's title page.
+ *
+ * "Section 1: Calculations" on a full-bleed field, and nothing else on the sheet. It
+ * is what makes a fifteen page pack navigable held at arm's length, and both of the
+ * school's own packs open every topic with one. It carries no objectives: the pages
+ * it introduces state them, and a divider restating them is a wall of small print
+ * where a signpost should be.
+ */
+function dividerSheet(o: {
+  pack: PackV2; theme: Theme; index: number; total: number; accent: string;
+  eyebrow: string | null; title: string; paged?: boolean;
+}): string {
+  return `<section class="sheet divider ${slotClass(o.accent)}">
+  ${coverField(o.theme)}
+  <div class="divider-body">
+    ${o.eyebrow ? `<div class="cover-eyebrow">${esc(o.eyebrow)}</div>` : ''}
+    <h1>${esc(o.title)}</h1>
+    <div class="cover-rule"></div>
+  </div>
+  <img class="crest" src="${CREST}" alt="Lusaka Oaktree School">
+  ${o.paged ? '' : `<div class="cover-foot">${o.index + 1}/${o.total}</div>`}
+</section>`;
+}
+
 function sheet(o: {
-  pack: PackV2; index: number; total: number; accent: string; paged?: boolean;
+  pack: PackV2; theme: Theme; index: number; total: number; accent: string; paged?: boolean;
   eyebrow: string | null; title: string; objectives: { ref: string | null; text: string }[]; body: string;
+  role?: 'content' | 'divider';
   /** Whether this document has a cover, which is where a long objective list is
    *  stated in full. Without one there is nowhere to defer to, so nothing is said. */
   cover?: boolean;
   printOnly?: boolean;
 }): string {
   const { pack } = o;
+  if (o.role === 'divider') return dividerSheet(o);
   const subject = `${pack.meta.yearGroup} ${pack.meta.subject}`.trim();
-  return `<section class="sheet accent-${esc(o.accent)}${o.printOnly ? ' print-only' : ''}">
+  return `<section class="sheet ${slotClass(o.accent)}${o.printOnly ? ' print-only' : ''}">
   <header class="sheet-head">
     <img class="crest" src="${CREST}" alt="Lusaka Oaktree School">
     <div class="head-text">
@@ -284,7 +361,7 @@ function sheet(o: {
     <div class="head-page">${o.index + 1}/${o.total}</div>
   </header>
   ${o.objectives.length ? `<div class="objectives">${o.objectives.slice(0, PAGE_OBJECTIVES).map(t =>
-    `<p class="obj">${t.ref ? `<span class="ref">${esc(t.ref)}</span>` : ''}${esc(t.text)}</p>`).join('')}${
+    `<p class="obj">${esc(t.text)}${t.ref ? ` <span class="ref">${esc(t.ref)}</span>` : ''}</p>`).join('')}${
     o.objectives.length > PAGE_OBJECTIVES
       ? `<p class="obj muted">and ${o.objectives.length - PAGE_OBJECTIVES} more${
           o.cover === false ? '' : ', listed in full on the cover'}</p>` : ''
@@ -299,7 +376,7 @@ function sheet(o: {
 
 // -------------------------------------------------------------------- blocks
 
-function renderBlock(b: Block, pack: PackV2): string {
+function renderBlock(b: Block, pack: PackV2, opts: RenderOpts = {}): string {
   switch (b.type) {
     case 'resources':
       return `<div class="block">
@@ -318,9 +395,12 @@ function renderBlock(b: Block, pack: PackV2): string {
 
     case 'key_notes':
       return `<div class="block"><div class="grid cols-${b.columns === 3 ? 3 : 2}">
-        ${b.cards.map(c => `<div class="note-card">
-          <div class="note-head">${esc(c.heading)}</div>
-          <div class="note-body">${esc(c.body)}</div>
+        ${b.cards.map(c => `<div class="note-card${c.tile ? ' tiled' : ''}">
+          ${c.tile ? `<span class="tile">${esc(String(c.tile).slice(0, 2))}</span>` : ''}
+          <div class="note-text">
+            <div class="note-head">${esc(c.heading)}</div>
+            <div class="note-body">${esc(c.body)}</div>
+          </div>
         </div>`).join('')}
       </div></div>`;
 
@@ -335,7 +415,7 @@ function renderBlock(b: Block, pack: PackV2): string {
         <div class="grid cols-${b.examples.length > 1 ? 2 : 1}">${b.examples.map(e => `<div class="worked">
           <div class="worked-q">Q: ${esc(e.prompt)}</div>
           <ol class="worked-steps">${e.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
-          <div class="worked-a">Answer: ${esc(e.answer)}</div>
+          ${e.answer ? `<div class="worked-a"><b>Answer</b> ${esc(e.answer)}</div>` : ''}
         </div>`).join('')}</div></div>`;
 
     case 'practice':
@@ -435,6 +515,21 @@ function renderBlock(b: Block, pack: PackV2): string {
         <h3>${esc(b.heading)}</h3>
         <ul>${b.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
       </div>`;
+
+    case 'diagram':
+      return diagramSvg(b);
+
+    case 'image': {
+      // An id the store does not hold draws nothing. A revision can name an asset
+      // that was later deleted, and a broken image on a printed pack is worse than
+      // a page that is simply one block shorter.
+      const src = opts.assets?.[b.asset_id];
+      if (!src) return '';
+      return `<figure class="block figure">
+        <img src="${src}" alt="${esc(b.alt)}">
+        ${b.caption ? `<figcaption>${esc(b.caption)}</figcaption>` : ''}
+      </figure>`;
+    }
     // A block type the renderer does not know draws nothing rather than throwing:
     // stored content outlives this file.
     default:
@@ -507,29 +602,207 @@ function chartSvg(b: Extract<Block, { type: 'chart' }>): string {
   </figure>`;
 }
 
+/**
+ * A drawn explanation, as inline SVG.
+ *
+ * Asked to make a concept clearer, the useful answer for teaching material is almost
+ * always a diagram rather than a picture, and a diagram is structure: five shapes
+ * cover most of what a primary and lower-secondary pack needs. Composed as data by
+ * the model and drawn here, it prints at any size, never mislabels itself, and costs
+ * nothing to make - the same bargain `chartSvg` already strikes.
+ *
+ * Everything is drawn in the page's accent, so a diagram belongs to its page.
+ */
+function diagramSvg(b: Extract<Block, { type: 'diagram' }>): string {
+  const body = (() => {
+    switch (b.kind) {
+      case 'number_line': return numberLine(b);
+      case 'bar_model': return barModel(b);
+      case 'cycle': return cycle(b);
+      case 'grid': return gridDiagram(b);
+      case 'flow':
+      default: return flow(b);
+    }
+  })();
+  if (!body) return '';
+  return `<figure class="block diagram">
+    ${b.title ? `<figcaption>${esc(b.title)}</figcaption>` : ''}
+    ${body}
+    ${b.caption ? `<p class="muted small">${esc(b.caption)}</p>` : ''}
+  </figure>`;
+}
+
+/** Steps left to right, joined by arrows, wrapping to a second row past four. */
+function flow(b: Extract<Block, { type: 'diagram' }>): string {
+  const nodes = b.nodes.slice(0, 8);
+  if (!nodes.length) return '';
+  const per = nodes.length > 4 ? Math.ceil(nodes.length / 2) : nodes.length;
+  const rows = [nodes.slice(0, per), nodes.slice(per)].filter(r => r.length);
+  const W = 520, BOX_H = 46, GAP = 18, ROW_GAP = 16;
+  const H = rows.length * BOX_H + (rows.length - 1) * ROW_GAP + 4;
+  const parts: string[] = [`<defs><marker id="dgar" viewBox="0 0 8 8" refX="7" refY="4"
+    markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-fill"/></marker></defs>`];
+
+  rows.forEach((row, r) => {
+    const bw = (W - GAP * (row.length - 1)) / row.length;
+    const y = r * (BOX_H + ROW_GAP) + 2;
+    row.forEach((n, i) => {
+      const x = i * (bw + GAP);
+      parts.push(`<rect class="dg-box" x="${x}" y="${y}" width="${bw}" height="${BOX_H}" rx="6"/>`);
+      parts.push(wrapText(esc(n.label), x + bw / 2, y + (n.note ? 19 : BOX_H / 2 + 4), bw - 12, 'dg-label'));
+      if (n.note) parts.push(`<text class="dg-note" x="${x + bw / 2}" y="${y + 34}" text-anchor="middle">${esc(n.note)}</text>`);
+      if (i < row.length - 1) {
+        parts.push(`<line class="dg-arrow" x1="${x + bw + 3}" y1="${y + BOX_H / 2}" `
+          + `x2="${x + bw + GAP - 5}" y2="${y + BOX_H / 2}" marker-end="url(#dgar)"/>`);
+      }
+    });
+  });
+
+  return svg(W, H, parts.join(''));
+}
+
+/** A ring of steps, numbered, for a process that returns to where it started. */
+function cycle(b: Extract<Block, { type: 'diagram' }>): string {
+  const nodes = b.nodes.slice(0, 6);
+  if (nodes.length < 2) return flow(b);
+  const W = 420, H = 220, cx = W / 2, cy = H / 2, rx = 150, ry = 78;
+  const parts = [`<ellipse class="dg-ring" cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"/>`];
+  nodes.forEach((n, i) => {
+    const a = (-Math.PI / 2) + (i * 2 * Math.PI) / nodes.length;
+    const x = cx + rx * Math.cos(a), y = cy + ry * Math.sin(a);
+    parts.push(`<circle class="dg-dot" cx="${x}" cy="${y}" r="13"/>`);
+    parts.push(`<text class="dg-num" x="${x}" y="${y + 4}" text-anchor="middle">${i + 1}</text>`);
+    parts.push(wrapText(esc(n.label), x, y + (Math.sin(a) >= 0 ? 30 : -20), 118, 'dg-label'));
+  });
+  return svg(W, H, parts.join(''));
+}
+
+/** A ruled line from `from` to `to`, with the marks that matter called out on it. */
+function numberLine(b: Extract<Block, { type: 'diagram' }>): string {
+  const from = b.from ?? 0, to = b.to ?? 10;
+  if (!(to > from)) return '';
+  const step = b.step && b.step > 0 ? b.step : (to - from) / 10;
+  const W = 520, H = 96, PAD = 26, y = 56;
+  const at = (v: number) => PAD + ((v - from) / (to - from)) * (W - PAD * 2);
+  const parts = [`<line class="dg-axis" x1="${PAD}" y1="${y}" x2="${W - PAD}" y2="${y}"/>`];
+  // A step that would draw hundreds of ticks is a step the model got wrong; cap it
+  // rather than print a black band.
+  const ticks = Math.min(41, Math.floor((to - from) / step) + 1);
+  for (let i = 0; i < ticks; i++) {
+    const v = from + i * step, x = at(v);
+    parts.push(`<line class="dg-tick" x1="${x}" y1="${y - 5}" x2="${x}" y2="${y + 5}"/>`);
+    parts.push(`<text class="dg-note" x="${x}" y="${y + 20}" text-anchor="middle">${round(v)}</text>`);
+  }
+  for (const m of b.marks.slice(0, 8)) {
+    if (m.at < from || m.at > to) continue;
+    const x = at(m.at);
+    parts.push(`<circle class="dg-dot" cx="${x}" cy="${y}" r="6"/>`);
+    parts.push(`<text class="dg-label" x="${x}" y="${y - 14}" text-anchor="middle">${esc(m.label)}</text>`);
+  }
+  return svg(W, H, parts.join(''));
+}
+
+/** Parts of a whole, drawn to width - the bar model a primary maths pack lives on. */
+function barModel(b: Extract<Block, { type: 'diagram' }>): string {
+  const parts = b.parts.filter(p => Number.isFinite(p.value) && p.value > 0).slice(0, 8);
+  const total = parts.reduce((n, p) => n + p.value, 0);
+  if (!total) return '';
+  const W = 520, H = 78, BAR = 44, y = 8;
+  const out: string[] = [];
+  let x = 0;
+  parts.forEach((p, i) => {
+    const w = (p.value / total) * W;
+    out.push(`<rect class="dg-part dg-part-${(i % 3) + 1}" x="${x}" y="${y}" width="${w}" height="${BAR}" rx="4"/>`);
+    out.push(`<text class="dg-part-v" x="${x + w / 2}" y="${y + 27}" text-anchor="middle">${round(p.value)}</text>`);
+    out.push(`<text class="dg-note" x="${x + w / 2}" y="${y + BAR + 17}" text-anchor="middle">${esc(p.label)}</text>`);
+    x += w;
+  });
+  return svg(W, H, out.join(''));
+}
+
+/** Headers across the top, cells filled in order - place value, a times grid. */
+function gridDiagram(b: Extract<Block, { type: 'diagram' }>): string {
+  const cols = b.headers.length || Math.min(4, b.nodes.length) || 1;
+  const cells = b.nodes.slice(0, cols * 6);
+  if (!cells.length) return '';
+  const rows = Math.ceil(cells.length / cols);
+  const W = 520, CW = W / cols, CH = 40, head = b.headers.length ? 26 : 0;
+  const out: string[] = [];
+  b.headers.forEach((h, i) => {
+    out.push(`<rect class="dg-head" x="${i * CW}" y="0" width="${CW}" height="${head}"/>`);
+    out.push(`<text class="dg-head-t" x="${i * CW + CW / 2}" y="${head - 8}" text-anchor="middle">${esc(h)}</text>`);
+  });
+  cells.forEach((c, i) => {
+    const r = Math.floor(i / cols), col = i % cols;
+    const x = col * CW, y = head + r * CH;
+    out.push(`<rect class="dg-cell" x="${x}" y="${y}" width="${CW}" height="${CH}"/>`);
+    out.push(wrapText(esc(c.label), x + CW / 2, y + (c.note ? 17 : CH / 2 + 4), CW - 8, 'dg-label'));
+    if (c.note) out.push(`<text class="dg-note" x="${x + CW / 2}" y="${y + 31}" text-anchor="middle">${esc(c.note)}</text>`);
+  });
+  return svg(W, head + rows * CH, out.join(''));
+}
+
+function svg(w: number, h: number, body: string): string {
+  return `<svg class="dg" viewBox="0 0 ${w} ${h}" role="img">${body}</svg>`;
+}
+
+/** Trailing zeros off a computed tick: "2.5" and "3", never "3.0000000000000004". */
+function round(v: number): string {
+  return String(Math.round(v * 100) / 100);
+}
+
+/**
+ * SVG does not wrap. A two-word label in a box 90px wide is fine; a sentence in the
+ * same box runs out of both sides of it, so a long label is broken onto up to three
+ * lines at word boundaries and anything past that is cut with an ellipsis.
+ */
+function wrapText(text: string, x: number, y: number, width: number, cls: string): string {
+  const per = Math.max(6, Math.floor(width / 5.6));   // ~5.6px a character at 10px
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = '';
+  for (const w of words) {
+    if (!line) { line = w; continue; }
+    if ((line + ' ' + w).length <= per) line += ' ' + w;
+    else { lines.push(line); line = w; if (lines.length === 3) break; }
+  }
+  if (line && lines.length < 3) lines.push(line);
+  if (!lines.length) return '';
+  const last = lines.length - 1;
+  if (words.join(' ').length > lines.join(' ').length) lines[last] = lines[last].replace(/.$/, '…');
+  const top = y - ((lines.length - 1) * 11) / 2;
+  return lines.map((l, i) =>
+    `<text class="${cls}" x="${x}" y="${top + i * 11}" text-anchor="middle">${l}</text>`).join('');
+}
+
 // ----------------------------------------------------------------------- css
 
 function css(size: { css: string; w: string; h: string; px: string; py: string },
-             paged: boolean, slackMm: number): string {
+             paged: boolean, slackMm: number, theme: Theme): string {
+  const s = theme.slots;
   return `
 :root{
-  --forest:#1D5829; --forest-dark:#103C19; --forest-light:#31773F; --gold:#E3A73B; --gold-dark:#B8860B;
-  --purple:#4D27A5; --pink:#EC4899; --teal:#0D9488; --blue:#194AB3; --green:#16A34A; --red:#DC2626;
-  --ink:#26302A; --paper:#FFFDF8; --card:#FFFFFF; --muted:#657064; --line:#D9DED2;
-  --shadow:0 6px 18px rgba(23,41,28,.10);
-  --accent:var(--forest); --accent-2:var(--forest-light);
-  --font-display:'Fraunces',Georgia,serif; --font-body:'Public Sans','Segoe UI',sans-serif;
+${s.map((c, i) => `  --a${i + 1}:${c.c1}; --a${i + 1}b:${c.c2};`).join('\n')}
+  --mark:${theme.mark};
+  --ink:${theme.ink.text}; --paper:${theme.ink.paper}; --card:${theme.ink.card};
+  --muted:${theme.ink.muted}; --line:${theme.ink.line};
+  --tint:${theme.ink.tint}; --tint2:${theme.ink.tint2}; --deck:${theme.ink.deck};
+  --rule:${theme.ink.rule}; --link:${theme.ink.link};
+  --radius:${theme.radius}px;
+  --shadow:0 6px 18px rgba(20,24,30,.10);
+  --accent:var(--a1); --accent-2:var(--a1b);
+  --font-display:${theme.display}; --font-body:${theme.body};
 }
 *{box-sizing:border-box;}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important;}}
 html,body{margin:0;padding:0;}
-body{font-family:var(--font-body);color:var(--ink);background:#EEF1E8;line-height:1.45;font-size:12.5px;}
-.print-only{display:none;}
+body{font-family:var(--font-body);color:var(--ink);background:var(--deck);line-height:1.45;font-size:12.5px;}
+.print-only,.sheet.print-only,.grid.print-only{display:none;}
 .toolbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;
-  gap:12px;padding:10px 18px;background:var(--forest-dark);color:#fff;}
+  gap:12px;padding:10px 18px;background:var(--a1);color:#fff;}
 .toolbar .tb-title{font-family:var(--font-display);font-weight:700;font-size:15px;}
 .toolbar button{border:none;cursor:pointer;border-radius:999px;padding:8px 16px;font:inherit;font-weight:700;
-  background:var(--gold);color:#2A1E05;}
+  background:var(--mark);color:#fff;}
 .deck{display:flex;flex-direction:column;align-items:center;gap:18px;padding:18px 12px 40px;}
 
 /* On screen the sheet is fluid, so a pack is readable on a phone and never scrolls
@@ -539,11 +812,8 @@ body{font-family:var(--font-body);color:var(--ink);background:#EEF1E8;line-heigh
   width:100%;max-width:${size.w};padding:var(--py) var(--px);background:var(--card);
   box-shadow:var(--shadow);display:flex;flex-direction:column;position:relative;overflow:hidden;}
 @media screen and (min-width:calc(${size.w} + 40px)){.sheet{min-height:${size.h};}}
-.sheet.accent-forest{--accent:var(--forest);--accent-2:var(--forest-light);}
-.sheet.accent-purple{--accent:var(--purple);--accent-2:#9F67FF;}
-.sheet.accent-teal{--accent:var(--teal);--accent-2:#22D3EE;}
-.sheet.accent-blue{--accent:var(--blue);--accent-2:#7C3AED;}
-.sheet.accent-gold{--accent:var(--gold-dark);--accent-2:var(--gold);}
+${s.map((_, i) =>
+  `.sheet.accent-${i + 1}{--accent:var(--a${i + 1});--accent-2:var(--a${i + 1}b);}`).join('\n')}
 
 /* The page title sits in a full-bleed band, as it does on every page of the school's
    own packs: the band is what makes a section legible at a glance across a printed
@@ -564,16 +834,16 @@ body{font-family:var(--font-body);color:var(--ink);background:#EEF1E8;line-heigh
 
 /* Objectives in full, under the band. The code leads in gold, as on the GP cover. */
 .objectives{display:flex;flex-direction:column;gap:3px;
-  margin:0 calc(-1 * var(--px));padding:7px var(--px);background:#F5F7F0;
+  margin:0 calc(-1 * var(--px));padding:7px var(--px);background:var(--tint);
   border-bottom:1px solid var(--line);}
 .obj{margin:0;font-size:10.5px;color:#3F4A40;line-height:1.35;}
-.obj .ref{font-weight:700;color:var(--gold-dark);margin-right:6px;}
+.obj .ref{font-weight:700;color:var(--mark);margin-right:6px;}
 .sheet-body{flex:1;padding-top:11px;}
 .sheet-foot{display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:6px;
   border-top:1px solid var(--line);font-size:9.5px;color:var(--muted);}
 
 /* The cover: one dark panel, as both reference packs open on. */
-.cover{color:#fff;background:linear-gradient(135deg,var(--forest-dark),var(--forest));
+.cover{color:#fff;background:linear-gradient(135deg,var(--a1),var(--a1b));
   justify-content:center;}
 .cover::after{content:"";position:absolute;right:-14%;top:-32%;width:62%;aspect-ratio:1;
   border-radius:50%;background:rgba(255,255,255,.045);}
@@ -584,7 +854,7 @@ body{font-family:var(--font-body);color:var(--ink);background:#EEF1E8;line-heigh
 .cover-eyebrow{font-size:11px;font-weight:700;letter-spacing:.19em;text-transform:uppercase;
   color:rgba(255,255,255,.78);}
 .cover h1{font-family:var(--font-display);font-size:44px;line-height:1.06;margin:8px 0 0;font-weight:700;}
-.cover-rule{width:132px;height:7px;background:var(--gold);margin:16px 0 14px;}
+.cover-rule{width:132px;height:7px;background:var(--mark);margin:16px 0 14px;}
 .cover-sub{margin:0 0 4px;font-size:16px;color:rgba(255,255,255,.9);}
 .cover-meta{margin:0;font-size:13px;font-weight:600;color:rgba(255,255,255,.82);}
 .cover-objectives{margin-top:18px;display:flex;flex-direction:column;gap:5px;}
@@ -595,7 +865,7 @@ body{font-family:var(--font-body);color:var(--ink);background:#EEF1E8;line-heigh
 .cover-objectives.cols p{break-inside:avoid;margin-bottom:4px;}
 .cover-objectives.dense p{font-size:9.5px;line-height:1.3;margin-bottom:2px;}
 .cover-objectives p{margin:0;font-size:11.5px;color:rgba(255,255,255,.88);}
-.cover-objectives .ref{font-weight:700;color:var(--gold);margin-right:8px;}
+.cover-objectives .ref{font-weight:700;color:var(--mark);margin-right:8px;}
 .cover-objectives .more{color:rgba(255,255,255,.6);font-style:italic;}
 .cover-foot{position:relative;z-index:1;margin-top:auto;font-size:10px;
   color:rgba(255,255,255,.6);}
@@ -616,23 +886,23 @@ body{font-family:var(--font-body);color:var(--ink);background:#EEF1E8;line-heigh
 .cols-1{grid-template-columns:1fr;} .cols-2{grid-template-columns:1fr 1fr;}
 .cols-3{grid-template-columns:1fr 1fr 1fr;}
 
-.note-card{background:#F5F7F0;border-left:4px solid var(--accent);border-radius:8px;padding:9px 12px;}
+.note-card{background:var(--tint);border-left:4px solid var(--accent);border-radius:var(--radius);padding:9px 12px;}
 .note-head{font-weight:700;color:var(--accent);margin-bottom:3px;}
 .note-body{white-space:pre-line;}
-.key-ideas{background:#F5F7F0;border-left:5px solid var(--accent);border-radius:8px;padding:9px 13px;}
+.key-ideas{background:var(--tint);border-left:5px solid var(--accent);border-radius:var(--radius);padding:9px 13px;}
 .key-ideas h4{margin:0 0 5px;font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
 .key-ideas ul{margin:0;padding-left:17px;} .key-ideas li{margin-bottom:3px;}
 
-.res-group{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#FCFDFA;}
+.res-group{border:1px solid var(--line);border-radius:var(--radius);padding:9px 11px;background:var(--tint2);}
 .res-label{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-bottom:5px;}
 .res-item{margin-bottom:7px;} .res-item:last-child{margin-bottom:0;}
 .res-name{font-weight:700;} .res-why{font-size:10.5px;color:var(--muted);}
-.res-url{font-size:10px;color:var(--blue);word-break:break-all;}
+.res-url{font-size:10px;color:var(--link);word-break:break-all;}
 
-.worked{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#FCFDFA;}
+.worked{border:1px solid var(--line);border-radius:var(--radius);padding:9px 11px;background:var(--tint2);}
 .worked-q{font-weight:700;margin-bottom:4px;}
 .worked-steps{margin:0 0 5px;padding-left:18px;} .worked-steps li{margin-bottom:2px;}
-.worked-a{font-weight:700;color:var(--green);}
+
 
 /* Numbered questions with a badge and the marks in gold, as on GP LS3's section
    pages. The counter is on the list, so a two-column drill still numbers 1-10 down
@@ -645,9 +915,9 @@ body{font-family:var(--font-body);color:var(--ink);background:#EEF1E8;line-heigh
   border-radius:50%;background:var(--accent);color:#fff;font-size:10.5px;font-weight:700;
   display:flex;align-items:center;justify-content:center;}
 .q-text{font-weight:500;}
-.marks{color:var(--gold-dark);font-weight:700;font-size:10.5px;}
+.marks{color:var(--mark);font-weight:700;font-size:10.5px;}
 .ruled{margin-top:6px;display:flex;flex-direction:column;gap:11px;}
-.ruled span{display:block;border-bottom:1px dotted #B9C2B2;height:1px;}
+.ruled span{display:block;border-bottom:1px dotted var(--rule);height:1px;}
 .opts{margin-top:3px;} .opt{padding:2px 0 2px 6px;}
 /* "A) 5  B) 6  C) 7" belongs on one line. Stacked, five such questions ran a maths
    sheet on to a second page over four words of answer. Options long enough to be read
@@ -655,10 +925,10 @@ body{font-family:var(--font-body);color:var(--ink);background:#EEF1E8;line-heigh
 .opts.inline{display:flex;flex-wrap:wrap;column-gap:22px;}
 .opts.inline .opt{padding:2px 0;}
 
-.source{border:1px solid var(--line);border-radius:10px;background:#FCFDFA;overflow:hidden;}
+.source{border:1px solid var(--line);border-radius:var(--radius);background:var(--tint2);overflow:hidden;}
 .src-label{background:var(--accent);color:#fff;font-weight:700;padding:6px 11px;}
 .src-text{padding:9px 11px 0;}
-.src-check{margin:8px 11px 10px;background:#F1F5FF;border:1px dashed #C7D2FE;border-radius:6px;
+.src-check{margin:8px 11px 10px;background:var(--tint);border:1px dashed var(--line);border-radius:6px;
   padding:6px 9px;font-size:11px;}
 
 .table-wrap{overflow-x:auto;}
@@ -666,35 +936,35 @@ table{width:100%;border-collapse:collapse;}
 th{background:var(--accent);color:#fff;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
   padding:6px 8px;text-align:left;}
 td{border:1px solid var(--line);padding:6px 8px;vertical-align:top;}
-tbody tr:nth-child(even) td{background:#F8FAF5;}
+tbody tr:nth-child(even) td{background:var(--tint2);}
 
 .chart-row{display:flex;gap:12px;align-items:flex-start;}
-.chart-main{flex:2;min-width:0;} .chart-aside{flex:1;border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#FCFDFA;}
+.chart-main{flex:2;min-width:0;} .chart-aside{flex:1;border:1px solid var(--line);border-radius:var(--radius);padding:9px 11px;background:var(--tint2);}
 .chart-aside ul{margin:0;padding-left:16px;font-size:10.5px;}
 .chart figcaption{font-weight:700;margin-bottom:4px;}
 .chart svg{width:100%;height:auto;}
-.chart .gridline{stroke:#E4E8DE;stroke-width:1;}
-.chart .axis-line{stroke:#9AA595;stroke-width:1;}
+.chart .gridline{stroke:var(--line);stroke-width:1;}
+.chart .axis-line{stroke:var(--muted);stroke-width:1;}
 .chart .axis{font-size:10px;fill:var(--muted);}
 .chart .value{font-size:10px;font-weight:700;fill:var(--accent);}
 .chart .bar{fill:var(--accent);}
 .chart .line{fill:none;stroke:var(--accent);stroke-width:2.5;}
 .chart .dot{fill:var(--accent);}
 
-.callout{border-radius:10px;padding:8px 11px;border:1px solid;}
+.callout{border-radius:var(--radius);padding:8px 11px;border:1px solid;}
 .tone-note{background:#F1F5FF;border-color:#C7D2FE;}
 .tone-tip{background:#F0FDF4;border-color:#86EFAC;}
 .tone-warning{background:#FEF2F2;border-color:#FCA5A5;}
 
-.think{background:#FFF7ED;border:2px solid #FDBA74;border-radius:10px;padding:9px 12px;}
+.think{background:var(--tint2);border:2px solid var(--mark);border-radius:var(--radius);padding:9px 12px;}
 .think h5{margin:0 0 4px;font-size:11px;}
 .think p{margin:0;}
 
-.reflect{background:#F7F5FF;border:2px solid #DDD3FF;border-radius:10px;padding:10px 12px;}
+.reflect{background:var(--tint);border:2px solid var(--accent);border-radius:var(--radius);padding:10px 12px;}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;}
 .chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:10px;font-weight:600;}
 
-.check-col{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#FCFDFA;}
+.check-col{border:1px solid var(--line);border-radius:var(--radius);padding:9px 11px;background:var(--tint2);}
 .checks{list-style:none;margin:6px 0 0;padding:0;}
 .checks li{margin-bottom:4px;} .checks label{display:flex;gap:7px;align-items:flex-start;cursor:pointer;}
 .checks input{margin:2px 0 0;width:13px;height:13px;flex:none;}
@@ -731,6 +1001,123 @@ tbody tr:nth-child(even) td{background:#F8FAF5;}
   display:flex;align-items:center;justify-content:center;padding:8px;text-align:center;box-shadow:var(--shadow);}
 .flash-front{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-weight:700;}
 .flash-back{background:#fff;border:2px solid var(--accent);transform:rotateY(180deg);font-size:10px;}
+
+/* ------------------------------------------------------------- theme variants
+
+   Everything below is chosen by the pack's theme rather than fixed. The header
+   treatment, the cover composition and the card treatment are what stop two packs
+   built a fortnight apart from being the same document in different colours - the
+   school's own two maths packs differ in exactly these three things and in nothing
+   structural at all. */
+
+/* The header band. The gradient is the original. */
+${theme.head === 'solid' ? `.sheet-head{background:var(--accent);}` : ''}
+${theme.head === 'rule' ? `
+.sheet-head{background:var(--card);color:var(--ink);border-bottom:5px solid var(--accent);}
+.sheet-head h2{color:var(--accent);}
+.sheet-head .eyebrow{color:var(--muted);}
+.sheet-head .head-page{color:var(--muted);}
+.sheet-head .crest{background:var(--tint);}` : ''}
+${theme.head === 'underline' ? `
+.sheet-head{background:var(--paper);color:var(--ink);border-bottom:1px solid var(--line);}
+.sheet-head h2{color:var(--ink);display:inline-block;
+  box-shadow:inset 0 -6px 0 -1px var(--accent-2);}
+.sheet-head .eyebrow{color:var(--accent);}
+.sheet-head .head-page{color:var(--muted);}
+.sheet-head .crest{background:var(--tint);}` : ''}
+
+/* Cover and divider decoration. Purely decorative, so it carries nothing to read
+   and is drawn behind the text at low contrast. */
+.cf{position:absolute;display:block;pointer-events:none;}
+.orb{border-radius:50%;background:rgba(255,255,255,.07);}
+.orb.a{right:-14%;top:-32%;width:62%;aspect-ratio:1;}
+.orb.b{left:-18%;bottom:-40%;width:46%;aspect-ratio:1;background:rgba(255,255,255,.05);}
+.orb.c{right:22%;bottom:-30%;width:26%;aspect-ratio:1;background:rgba(255,255,255,.045);}
+.band{left:0;right:0;bottom:0;height:22%;background:var(--accent-2);opacity:.9;}
+.split{left:0;top:0;bottom:0;width:38%;background:rgba(0,0,0,.16);}
+.edge{left:0;top:0;bottom:0;width:14px;background:var(--mark);}
+
+.cover-orbit{background:var(--a1);}
+.cover-band{background:var(--a1);}
+.cover-split{background:linear-gradient(115deg,var(--a1) 45%,var(--a1b) 45%);}
+.cover-rule{background:var(--a1);}
+.cover-rule .cover-body,.cover-split .cover-body{padding-left:26px;}
+/* The panel cover keeps the gradient it always had; ::after is replaced by the
+   .cf elements so a theme can have more than one shape. */
+.cover::after{content:none;}
+
+/* A topic's title page: the title, the school's crest, and nothing else. */
+.divider{color:#fff;background:linear-gradient(120deg,var(--accent),var(--accent-2));
+  justify-content:center;}
+.divider-body{position:relative;z-index:1;max-width:76%;}
+.divider h1{font-family:var(--font-display);font-size:40px;line-height:1.08;margin:6px 0 0;
+  font-weight:700;color:#fff;}
+.divider .crest{position:absolute;right:var(--px);bottom:var(--py);width:44px;height:44px;
+  border-radius:50%;background:#fff;padding:3px;opacity:.9;}
+.divider .cover-rule{width:110px;height:6px;background:var(--mark);margin:14px 0 0;}
+
+/* How a card is drawn. Four treatments, one per theme. */
+${theme.card === 'outline' ? `
+.note-card{background:var(--card);border:1px solid var(--line);border-left:1px solid var(--line);
+  border-top:3px solid var(--accent);}
+.res-group,.worked,.check-col,.chart-aside{background:var(--card);}` : ''}
+${theme.card === 'tint' ? `
+.note-card{background:var(--tint);border-left:none;}
+.res-group,.worked,.check-col,.chart-aside{background:var(--tint);border-color:transparent;}` : ''}
+${theme.card === 'shadow' ? `
+.note-card{background:var(--card);border-left:3px solid var(--accent);box-shadow:var(--shadow);}
+.res-group,.worked,.check-col,.chart-aside{background:var(--card);border-color:transparent;
+  box-shadow:var(--shadow);}` : ''}
+
+/* ------------------------------------------------------- new block furniture
+
+   A lettered tile beside a note card's heading, as the BODMAS column of "CP5
+   Mathematic StudyPack 1.pdf" does. It is what lets a learner find their place in a
+   list of six cards without reading all six. */
+.note-card.tiled{display:flex;gap:10px;align-items:flex-start;}
+.note-text{min-width:0;}
+.tile{flex:none;width:30px;height:30px;border-radius:calc(var(--radius) - 2px);
+  background:var(--accent);color:#fff;font-family:var(--font-display);font-weight:700;
+  font-size:15px;display:flex;align-items:center;justify-content:center;}
+
+/* The answer to a worked example, on a bar of its own - "Answer: 1482" across the
+   foot of the card, as "CP5 Mathematic StudyPack 2.pdf" prints it. Set apart from the
+   working, which is the whole point of a worked example. */
+/* The bar bleeds to the foot of the card by cancelling its padding, rather than the
+   card dropping its own - a worked example whose answer is empty keeps its shape. */
+.worked{display:flex;flex-direction:column;overflow:hidden;}
+.worked-a{margin:7px -11px -9px;padding:6px 11px;background:var(--accent);color:#fff;
+  font-weight:600;}
+.worked-a b{font-weight:700;margin-right:5px;text-transform:uppercase;font-size:10px;
+  letter-spacing:.08em;opacity:.85;}
+
+/* Diagrams. Drawn in the page's accent, so one belongs to its page. */
+.diagram{margin:0 0 11px;}
+.diagram figcaption{font-weight:700;margin-bottom:5px;}
+.dg{width:100%;height:auto;}
+.dg-box{fill:var(--tint);stroke:var(--accent);stroke-width:1.5;}
+.dg-cell{fill:var(--card);stroke:var(--line);stroke-width:1;}
+.dg-head{fill:var(--accent);}
+.dg-head-t{fill:#fff;font-size:10px;font-weight:700;}
+.dg-label{fill:var(--ink);font-size:10px;font-weight:600;}
+.dg-note{fill:var(--muted);font-size:9px;}
+.dg-arrow{stroke:var(--accent);stroke-width:1.6;}
+.dg-fill{fill:var(--accent);}
+.dg-axis{stroke:var(--ink);stroke-width:1.5;}
+.dg-tick{stroke:var(--muted);stroke-width:1;}
+.dg-ring{fill:none;stroke:var(--line);stroke-width:2;stroke-dasharray:5 5;}
+.dg-dot{fill:var(--accent);}
+.dg-num{fill:#fff;font-size:10px;font-weight:700;}
+.dg-part{fill:var(--accent);}
+.dg-part-2{fill:var(--accent-2);}
+.dg-part-3{fill:var(--mark);}
+.dg-part-v{fill:#fff;font-size:11px;font-weight:700;}
+
+/* A picture the teacher put in, or asked to have drawn. Capped in height so one
+   never takes a page it was not given. */
+.figure{margin:0 0 11px;text-align:center;}
+.figure img{max-width:100%;max-height:76mm;border-radius:var(--radius);border:1px solid var(--line);}
+.figure figcaption{margin-top:5px;font-size:10.5px;color:var(--muted);}
 
 @media print{
   @page{size:${size.css};margin:${paged ? `0 0 ${slackMm}mm` : '0'};}
@@ -786,12 +1173,13 @@ function printRules(size: { css: string; w: string; h: string; px: string; py: s
      to 338mm. Chrome then scaled the whole document by 297/338 to fit the paper, so
      every millimetre in this stylesheet printed 12 per cent short and the panel
      covered seven eighths of the page. Nothing but decoration is outside the box. */
-  ${p('.sheet.cover')}{min-height:calc(${size.h} - ${slackMm}mm);overflow:hidden;}
+  ${p('.sheet.cover')},${p('.sheet.divider')}{min-height:calc(${size.h} - ${slackMm}mm);overflow:hidden;}
   /* Without a fixed sheet height there is nothing to stretch into, and a stretched
      body leaves a page of white between the last block and the page break. */
   ${paged ? `${p('.paged .sheet-body')}{flex:none;}` : ''}
   ${p('.sheet:last-child')}{break-after:auto;page-break-after:auto;}
-  ${p('.block')},${p('.note-card')},${p('.worked')},${p('.source')},${p('.res-group')},${p('.row')}{break-inside:avoid;}`;
+  ${p('.block')},${p('.note-card')},${p('.worked')},${p('.source')},${p('.res-group')},${p('.row')},
+  ${p('.diagram')},${p('.figure')}{break-inside:avoid;}`;
 }
 
 // -------------------------------------------------------------------- engine

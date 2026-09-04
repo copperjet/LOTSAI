@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { createHash } from 'node:crypto';
-import type { CallOpts, ProviderResult } from '../llm';
+import type { CallOpts, ImageOpts, ProviderResult } from '../llm';
 
 /**
  * The OpenAI provider, on the Responses API. Metering lives in lib/llm.ts.
@@ -74,4 +74,24 @@ export async function complete(o: CallOpts, model: string): Promise<ProviderResu
       output: u?.output_tokens ?? 0,
     },
   };
+}
+
+/**
+ * Draw one picture. Metering, pricing and the mock all live in lib/llm.ts.
+ *
+ * The Images API answers with base64 rather than a URL for these models, which is
+ * what we want: the bytes go straight into the artefacts bucket, and there is no
+ * expiring link for a pack to be pointed at.
+ */
+export async function image(o: ImageOpts, model: string): Promise<Uint8Array> {
+  const res = await client().images.generate({
+    model,
+    prompt: o.prompt,
+    size: o.size ?? '1024x1024',
+    n: 1,
+  });
+
+  const b64 = res.data?.[0]?.b64_json;
+  if (!b64) throw new Error(`${o.workflow}: the image model returned no image`);
+  return new Uint8Array(Buffer.from(b64, 'base64'));
 }

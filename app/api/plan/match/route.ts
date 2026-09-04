@@ -15,14 +15,20 @@ export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
   const db = admin();
   const user = await currentUser();
-  const { classId, weekNumber } = await req.json();
+const body = await req.json();
+  const { classId, weekNumber } = body;
+  // A week number belongs to a semester: both have a week 1, and the registry keys on
+  // the pair. Older callers send no semester, so it defaults to 1 - what every stored
+  // row was written as before the calendar carried the rest of the year.
+  const semester = Number(body.semester) === 2 ? 2 : 1;
+
 
   const { data: klass } = await db.from('klass').select('*').eq('id', classId).single();
   if (!klass) return NextResponse.json({ error: 'Unknown class' }, { status: 404 });
 
   const { data: reg } = await db.from('curriculum_week').select('*')
     .eq('year_group', klass.year_group).eq('subject_id', klass.subject_id)
-    .eq('week_number', weekNumber).eq('academic_year', '2026-27').maybeSingle();
+    .eq('week_number', weekNumber).eq('semester', semester).eq('academic_year', '2026-27').maybeSingle();
 
   if (!reg) {
     return NextResponse.json({

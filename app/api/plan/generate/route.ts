@@ -22,7 +22,13 @@ interface LessonRow {
 export async function POST(req: NextRequest) {
   const db = admin();
   const user = await currentUser();
-  const { classId, weekNumber, mode, basisArtifactId } = await req.json();
+const body = await req.json();
+  const { classId, weekNumber, mode, basisArtifactId } = body;
+  // A week number belongs to a semester: both have a week 1, and the registry keys on
+  // the pair. Older callers send no semester, so it defaults to 1 - what every stored
+  // row was written as before the calendar carried the rest of the year.
+  const semester = Number(body.semester) === 2 ? 2 : 1;
+
 
   // The workflow + its Standard drive generation and gating. Falls back to the
   // built-in weekly_planner config if migration 0007 has not been applied, so the
@@ -35,7 +41,7 @@ export async function POST(req: NextRequest) {
 
   const { data: reg } = await db.from('curriculum_week').select('*')
     .eq('year_group', klass.year_group).eq('subject_id', klass.subject_id)
-    .eq('week_number', weekNumber).eq('academic_year', '2026-27').single();
+    .eq('week_number', weekNumber).eq('semester', semester).eq('academic_year', '2026-27').single();
   if (!reg?.signed_off_at) {
     return NextResponse.json({ error: 'not_signed_off', message: 'This subject is still waiting to be signed off for the semester.' }, { status: 409 });
   }

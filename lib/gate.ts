@@ -36,11 +36,18 @@ export function deterministic(i: GateInput): Check[] {
   const refs = used.map(o => o.ref).filter((r): r is string => !!r);
 
   const unknown = refs.filter(r => !i.registryRefs.includes(r));
+  // Named by what they say, with the code after. A teacher reading a blocked check
+  // was given "4Rg.04, 4Rs.01" and had to go and look up what the application was
+  // objecting to; the objective is right here in the input.
+  const nameOf = (ref: string) => {
+    const text = used.find(o => o.ref === ref)?.text;
+    return text ? `"${text}" (${ref})` : ref;
+  };
   out.push(unknown.length
     ? { id: 'refs', status: 'block', title: 'An objective is not in the curriculum',
-        detail: `${unknown.join(', ')} - I only use objectives the school's curriculum holds, and these are not in it. Check the week.` }
+        detail: `${unknown.map(nameOf).join('; ')} - I only use objectives the school's curriculum holds, and these are not in it. Check the week.` }
     : { id: 'refs', status: 'pass', title: 'Every objective is in the curriculum',
-        detail: refs.length ? `${[...new Set(refs)].join(', ')} found.`
+        detail: refs.length ? `${new Set(refs).size} objective(s), all found in the registry.`
                             : 'This week is topic-only - the overview states objectives in prose, with no codes.' });
 
   const badDate = i.lessons.some(l => {

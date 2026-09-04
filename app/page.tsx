@@ -53,6 +53,7 @@ type TurnKind =
   | 'calendar' | 'planPicker' | 'packPicker' | 'worksheetPicker' | 'uploadCard' | 'pasteCard'
   | 'plannerCard' | 'plannerExists' | 'plannerUncoded' | 'plannerFirst' | 'plannerMatch'
   | 'plannerApproved' | 'packCard' | 'packUncoded' | 'packFirst' | 'packMatch'
+  | 'packRevised'
   | 'worksheetCard' | 'worksheetFirst' | 'worksheetMatch' | 'approved'
   | 'homeworkPicker' | 'homeworkCard' | 'homeworkFirst' | 'homeworkMatch'
   | 'evaluatePrompt' | 'evaluated' | 'queuedOffline'
@@ -65,6 +66,48 @@ const EPHEMERAL: TurnKind[] = ['uploadCard'];
 type Turn =
   | { who: 'user'; text: string }
   | { who: 'ai'; kind: TurnKind; data?: Record<string, unknown> };
+
+/** One item of a structured answer, as lib/ask.ts returns it. */
+type Point = { label: string | null; text: string };
+
+/**
+ * What LOTS AI says, with shape.
+ *
+ * Every reply used to be `<p className="said">{text}</p>` under a global `p{margin:0}`,
+ * with no white-space handling and no markdown anywhere in the application. So a reply
+ * naming six weeks and eleven objectives arrived as one unbroken block, and nothing the
+ * model could have written would have changed that - a blank line in the string
+ * collapsed to a space before it reached the screen.
+ *
+ * Two things fix it. The model now says what the parts of an answer are (lib/ask.ts
+ * returns `points` beside `answer`), and a paragraph break in plain text is honoured
+ * here - which the twenty-odd canned replies elsewhere in this file get for free,
+ * without being rewritten.
+ *
+ * Deliberately not a markdown renderer. Structured JSON is how every other answer in
+ * this application travels, it needs no dependency, and it cannot put markup on the
+ * page that a model wrote.
+ */
+function Said({ text, points, small }: { text: string; points?: Point[]; small?: boolean }) {
+  const paras = String(text ?? '').split(/\n\s*\n/).map(t => t.trim()).filter(Boolean);
+  const list = (points ?? []).filter(p => p?.text);
+  const cls = small ? 'said small' : 'said';
+  return (
+    <>
+      {paras.map((t, i) => <p key={i} className={cls}>{t}</p>)}
+      {list.length > 0 && (
+        <ul className="points">
+          {list.map((p, i) => (
+            <li key={i}>
+              {p.label && <b>{p.label}</b>}
+              <span>{p.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
 
 type Coverage = { name: string; planned: number; taught: number; landed: number };
 type Gap = {
@@ -108,6 +151,10 @@ const DAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
 interface ClassWeek {
   weekNumber: number; weekCommencing: string;
+  /** Both semesters number their weeks from 1, so a week is the pair, never the
+   *  number alone. The calendar carried only semester 1 until the whole year was
+   *  loaded, which is why this arrived late rather than being here from the start. */
+  semester: number;
   status: string | null; signedOff: boolean; topic: string | null;
 }
 interface ClassCal { id: string; name: string; subject_id: string; year_group: string; weeks: ClassWeek[] }
@@ -132,7 +179,7 @@ const ROLE_SAYS: Record<string, string> = {
 interface Hit { id: string; label: string; note: string; kind: string; payload: Record<string, unknown> }
 interface SearchHits { planners: Hit[]; weeks: Hit[]; bank: Hit[] }
 
-interface PackSpan { classId: string; weekFrom: number; weekTo: number }
+interface PackSpan { classId: string; weekFrom: number; weekTo: number; semester?: number }
 interface PackMatch {
   id: string; title: string; objective_refs: string[]; week_from: number; week_to: number;
   reuse_count: number; app_user?: { full_name: string } | null;
@@ -149,8 +196,42 @@ interface PackResult {
   fromFile?: { ref: string | null; text: string; source: 'matched' | 'file' }[];
   fromUpload?: { filename: string; resolved: number; unresolved: string[] };
 }
+/**
+ * The pack the conversation is currently about.
+ *
+ * A teacher who has just been handed a study pack and says "shorten the glossary on
+ * page 4" is talking about that pack, not asking the school's records a question. The
+ * router cannot tell that from the words alone - "page 4" names nothing the registry
+ * holds - so the pack card records which pack it drew and the router reads it.
+ */
+type LivePack = { id: string; title: string };
+
 /** Shorter than this is not material to build from - /api/ingest/text refuses it too. */
 const MIN_PASTE = 120;
+
+/**
+ * Is this a change to the document on the screen?
+ *
+ * Deliberately narrow. The cost of saying yes wrongly is a revision the teacher did
+ * not ask for; the cost of saying no wrongly is the question going to lib/ask.ts,
+ * which answers about the school rather than the pack and is a much smaller loss. So
+ * it wants a page named, or a verb that only makes sense about a document.
+ */
+function isAboutThePack(q: string): boolean {
+  return /\bpage \d+/.test(q)
+    || /\b(change|rewrite|reword|shorten|lengthen|expand|simplify|replace|swap|remove|delete|drop|take out|add|include|put|insert|move|reorder|redo|harder|easier|more|fewer|clearer|draw|illustrat)\b/.test(q);
+}
+
+/**
+ * Words that start a piece of work of their own, whatever is on the screen.
+ *
+ * "Set homework on this" contains "on this" and the word "set", and it is a homework,
+ * not a revision of the pack behind it. Checked first so a live pack never swallows
+ * the start of the next task.
+ */
+function startsNewWork(q: string): boolean {
+  return /\b(homework|worksheet|study.?pack|planner|plan next week|evaluate|coverage|registry|review)\b/.test(q);
+}
 
 /** Asking at length is still asking. */
 function isQuestion(text: string): boolean {
@@ -220,6 +301,10 @@ const PHASES: Record<string, string[]> = {
   evaluate:  ['Writing that up for your planner.', 'Tagging the objectives.'],
   approve:   ['Filing it in the shared bank.', 'Sending the PDF to your Drive folder.'],
   ask:       ['Let me have a look.'],
+  revise:    ['Making that change.',
+              'Checking the page still fits.',
+              'Redrawing the pack.'],
+  draw:      ['Drawing it.', 'Putting it on the page.'],
 };
 
 /** Advance a phase list every six seconds, holding on the last line. */
@@ -252,6 +337,8 @@ export default function App() {
   /** One line, for the short waits that never get as far as a second phase. */
   const setBusy = (line: string | null) => setBusyPhases(line ? [line] : null);
   const [online, setOnline] = useState(true);
+  /** The pack the conversation is about, if any. See LivePack. */
+  const [livePack, setLivePack] = useState<LivePack | null>(null);
   const [draft, setDraft] = useState('');
   const [dropping, setDropping] = useState(false);
   const [openFolds, setOpenFolds] = useState<Record<string, boolean>>({});
@@ -453,10 +540,10 @@ export default function App() {
         }} />;
 
       case 'said':
-        return <p className="said">{text}</p>;
+        return <Said text={text} points={d.points as Point[] | undefined} />;
 
       case 'bound':
-        return <div className="bound"><p style={{ fontSize: 14 }}>{text}</p></div>;
+        return <div className="bound"><Said text={text} small /></div>;
 
       case 'boundary':
         return (
@@ -473,7 +560,7 @@ export default function App() {
         return (
           <div className="c pad">
             <div className="eyebrow" style={{ marginBottom: 6 }}>Not from the school&rsquo;s records</div>
-            <p style={{ fontSize: 14.5, margin: 0 }}>{text}</p>
+            <Said text={text} points={d.points as Point[] | undefined} small />
           </div>
         );
 
@@ -512,16 +599,16 @@ export default function App() {
 
       case 'planPicker':
         return <PlanPicker classes={d.classes as ClassCal[]} today={d.today as string}
-                           onPick={(classId, weekNumber) => doMatch({ classId, weekNumber })} />;
+                           onPick={(classId, weekNumber, semester) => doMatch({ classId, weekNumber, semester })} />;
 
       case 'packPicker':
         return <StudyPackPicker classes={d.classes as ClassCal[]} today={d.today as string}
-                                onPick={(classId, weekFrom, weekTo) => doPackMatch({ classId, weekFrom, weekTo })}
+                                onPick={(classId, weekFrom, weekTo, semester) => doPackMatch({ classId, weekFrom, weekTo, semester })}
                                 onUpload={doPackFromUpload} />;
 
       case 'worksheetPicker':
         return <WorksheetPicker classes={d.classes as ClassCal[]}
-                                onPick={(classId, weekNumber) => doWorksheetMatch(classId, weekNumber)} />;
+                                onPick={(classId, weekNumber, semester) => doWorksheetMatch(classId, weekNumber, semester)} />;
 
       case 'uploadCard':
         return <UploadCard classes={d.classes as ClassCal[]} onBuild={doBuildFromUpload}
@@ -575,9 +662,10 @@ export default function App() {
         const p = d.p as { classId: string; weekNumber: number };
         return (<>
           <p className="said">
-            Nobody has planned <b>{(d.refs as string[]).join(' and ')}</b> for this year group yet. You are first -
+            Nobody has planned week {p.weekNumber} for this year group yet. You are first -
             what you write becomes the starting point for the other streams.
           </p>
+          <ObjectiveList objectives={d.objectives as Objective[]} refs={d.refs as string[]} />
           <div className="acts">
             <button className="btn primary" onClick={() => doGenerate(p, 'create')}>Write it</button>
             <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about a minute</span>
@@ -591,14 +679,15 @@ export default function App() {
                            objective_refs: string[]; landed_rate: number | null; reuse_count: number };
         return (<>
           <p className="said">
-            Week {p.weekNumber} is <b>{(d.refs as string[]).join(' and ')}</b>. Before generating anything I
+            This is what week {p.weekNumber} covers. Before generating anything I
             checked the shared bank - somebody has already done this week.
           </p>
+          <ObjectiveList objectives={d.objectives as Objective[]} refs={d.refs as string[]} />
           <div className="match">
             <div className="flag">◆ {String(d.why ?? '')}</div>
             <h3 style={{ fontSize: 18 }}>{a.author_name} - week {a.week_number}</h3>
             <div className="row" style={{ marginTop: 10 }}>
-              {a.objective_refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+              {a.objective_refs.map(ref => <span key={ref} className="code">{ref}</span>)}
               {a.landed_rate != null && <span className="pill ok">{a.landed_rate}% of objectives landed</span>}
               <span className="pill grey">reused {a.reuse_count}×</span>
             </div>
@@ -629,7 +718,32 @@ export default function App() {
         const r = d.r as PackResult;
         return <PackCard r={r} onOpen={() => openPack(r.studyPackId)}
                          onPdf={() => openPackPdf(r.studyPackId)}
-                         onApprove={() => doApprovePack(r.studyPackId)} />;
+                         onApprove={() => doApprovePack(r.studyPackId)}
+                         onAsk={r.studyPackId ? doRevise : undefined} />;
+      }
+
+      case 'packRevised': {
+        const pages = (d.pages as number[]) ?? [];
+        return (<>
+          <Said text={String(d.note ?? '')} />
+          {pages.length > 0 && (
+            <p className="said small" style={{ color: 'var(--muted)' }}>
+              {pages.length === 1 ? `Page ${pages[0]} changed` : `Pages ${pages.join(', ')} changed`}
+              {d.revision ? `, saved as version ${d.revision}.` : '.'} Open the pack to see it.
+            </p>
+          )}
+          <div className="acts" style={{ marginTop: 10 }}>
+            <button className="btn primary" onClick={() => openPack(String(d.studyPackId))}>
+              Open the study pack
+            </button>
+            <button className="btn" onClick={() => openPackPdf(String(d.studyPackId))}>
+              Download printable PDF
+            </button>
+            {d.revision != null && Number(d.revision) > 1 && (
+              <button className="btn" onClick={() => doRevert(Number(d.revision) - 1)}>Undo that</button>
+            )}
+          </div>
+        </>);
       }
 
       case 'packUncoded': {
@@ -671,7 +785,7 @@ export default function App() {
           <div className="match">
             <h3 style={{ fontSize: 18 }}>{best.title}</h3>
             <div className="row" style={{ marginTop: 10 }}>
-              {best.objective_refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+              {best.objective_refs.map(ref => <span key={ref} className="code">{ref}</span>)}
               <span className="pill grey">reused {best.reuse_count}×</span>
               {best.app_user?.full_name && <span className="pill grey">by {best.app_user.full_name}</span>}
             </div>
@@ -689,7 +803,7 @@ export default function App() {
       case 'homeworkPicker':
         return <WorksheetPicker classes={d.classes as ClassCal[]}
                                 asks="Which class, and which week&rsquo;s objectives should the homework cover?"
-                                onPick={(classId, weekNumber) => doHomeworkMatch(classId, weekNumber)} />;
+                                onPick={(classId, weekNumber, semester) => doHomeworkMatch(classId, weekNumber, semester)} />;
 
       case 'homeworkCard': {
         const r = d.r as HomeworkResult;
@@ -698,7 +812,8 @@ export default function App() {
       }
 
       case 'homeworkFirst': {
-        const classId = d.classId as string, weekNumber = d.weekNumber as number, refs = d.refs as string[];
+        const classId = d.classId as string, weekNumber = d.weekNumber as number;
+        const semester = (d.semester as number) ?? 1, refs = d.refs as string[];
         return (<>
           <p className="said">
             Week {weekNumber} covers {refs.length} objective{refs.length === 1 ? '' : 's'}. Nobody has
@@ -706,7 +821,7 @@ export default function App() {
           </p>
           <ObjectiveList objectives={d.objectives as Objective[] | undefined} refs={refs} />
           <div className="acts" style={{ marginTop: 12 }}>
-            <button className="btn primary" onClick={() => doHomeworkGenerate(classId, weekNumber)}>Set it</button>
+            <button className="btn primary" onClick={() => doHomeworkGenerate(classId, weekNumber, semester)}>Set it</button>
             <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about a minute</span>
           </div>
         </>);
@@ -714,6 +829,7 @@ export default function App() {
 
       case 'homeworkMatch': {
         const classId = d.classId as string, weekNumber = d.weekNumber as number;
+        const semester = (d.semester as number) ?? 1;
         const refs = d.refs as string[], best = d.best as HomeworkMatch;
         return (<>
           <p className="said">
@@ -724,7 +840,7 @@ export default function App() {
           <div className="match">
             <h3 style={{ fontSize: 18 }}>{best.title}</h3>
             <div className="row" style={{ marginTop: 10 }}>
-              {best.objective_refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+              {best.objective_refs.map(ref => <span key={ref} className="code">{ref}</span>)}
               <span className="pill grey">reused {best.reuse_count}×</span>
               {best.app_user?.full_name && <span className="pill grey">by {best.app_user.full_name}</span>}
             </div>
@@ -733,7 +849,7 @@ export default function App() {
               <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>ready now</span>
             </div>
             <div className="acts" style={{ marginTop: 10 }}>
-              <button className="quiet" onClick={() => doHomeworkGenerate(classId, weekNumber)}>Set a new one instead</button>
+              <button className="quiet" onClick={() => doHomeworkGenerate(classId, weekNumber, semester)}>Set a new one instead</button>
             </div>
           </div>
         </>);
@@ -746,7 +862,8 @@ export default function App() {
       }
 
       case 'worksheetFirst': {
-        const classId = d.classId as string, weekNumber = d.weekNumber as number, refs = d.refs as string[];
+        const classId = d.classId as string, weekNumber = d.weekNumber as number;
+        const semester = (d.semester as number) ?? 1, refs = d.refs as string[];
         return (<>
           <p className="said">
             Week {weekNumber} covers {refs.length} objective{refs.length === 1 ? '' : 's'}. Nobody has an
@@ -754,7 +871,7 @@ export default function App() {
           </p>
           <ObjectiveList objectives={d.objectives as Objective[] | undefined} refs={refs} />
           <div className="acts" style={{ marginTop: 12 }}>
-            <button className="btn primary" onClick={() => doWorksheetGenerate(classId, weekNumber)}>Build it</button>
+            <button className="btn primary" onClick={() => doWorksheetGenerate(classId, weekNumber, semester)}>Build it</button>
             <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>about a minute</span>
           </div>
         </>);
@@ -762,6 +879,7 @@ export default function App() {
 
       case 'worksheetMatch': {
         const classId = d.classId as string, weekNumber = d.weekNumber as number;
+        const semester = (d.semester as number) ?? 1;
         const refs = d.refs as string[], best = d.best as WorksheetMatch;
         return (<>
           <p className="said">
@@ -772,7 +890,7 @@ export default function App() {
           <div className="match">
             <h3 style={{ fontSize: 18 }}>{best.title}</h3>
             <div className="row" style={{ marginTop: 10 }}>
-              {best.objective_refs.map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+              {best.objective_refs.map(ref => <span key={ref} className="code">{ref}</span>)}
               <span className="pill grey">reused {best.reuse_count}×</span>
               {best.app_user?.full_name && <span className="pill grey">by {best.app_user.full_name}</span>}
             </div>
@@ -781,7 +899,7 @@ export default function App() {
               <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>ready now</span>
             </div>
             <div className="acts" style={{ marginTop: 10 }}>
-              <button className="quiet" onClick={() => doWorksheetGenerate(classId, weekNumber)}>Build a new one instead</button>
+              <button className="quiet" onClick={() => doWorksheetGenerate(classId, weekNumber, semester)}>Build a new one instead</button>
             </div>
           </div>
         </>);
@@ -805,10 +923,13 @@ export default function App() {
 
       case 'evaluatePrompt': {
         const lesson = d.lesson as { id: string; day_of_week: number; objectives: Objective[] };
-        const refs = lesson.objectives.map(o => o.ref).filter(Boolean).join(', ');
+        // The lesson, not its indexes: "Comment on how fiction reflects its context"
+        // is what a teacher remembers teaching; "4Ra.04, 4SLp.02" is not.
+        const what = lesson.objectives[0]?.text ?? 'your lesson';
+        const more = lesson.objectives.length - 1;
         return (<>
           <p className="lead">
-            {DAYS[lesson.day_of_week]} - {refs || lesson.objectives[0]?.text?.slice(0, 60)}.<br />How did it go?
+            {DAYS[lesson.day_of_week]} - {what}{more > 0 ? ` and ${more} more` : ''}.<br />How did it go?
           </p>
           <div className="acts">
             <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
@@ -850,7 +971,7 @@ export default function App() {
               <div key={b.id as string} className="c bcard">
                 <h4>{b.author_name as string} - week {b.week_number as number}</h4>
                 <div className="row" style={{ gap: 5 }}>
-                  {((b.objective_refs as string[]) ?? []).map(x => <span key={x} className="pill ref">{x}</span>)}
+                  {((b.objective_refs as string[]) ?? []).map(x => <span key={x} className="code">{x}</span>)}
                 </div>
                 {b.landed_rate != null ? (
                   <div>
@@ -909,7 +1030,7 @@ export default function App() {
   }
 
   function dispatch(intent: string, payload?: Record<string, unknown>) {
-    if (intent === 'plan') return doMatch(payload as unknown as { classId: string; weekNumber: number });
+    if (intent === 'plan') return doMatch(payload as unknown as { classId: string; weekNumber: number; semester?: number });
     if (intent === 'evaluate') return doEvaluate();
     if (intent === 'bank') return doBank();
     if (intent === 'review') return doReview();
@@ -920,6 +1041,22 @@ export default function App() {
   function route(text: string) {
     said(text);
     const q = text.toLowerCase();
+
+    // A pack is on the screen and the teacher is talking about it. "Shorten the
+    // glossary on page 4" and "make that clearer" are changes to a document, not
+    // questions about the school - and every one of them used to reach lib/ask.ts,
+    // which answered as best it could about a pack it had never seen.
+    //
+    // Tested before anything else, and narrowly: a request that names a page, or asks
+    // for something to be changed, drawn, added or taken out. "Plan next week" and
+    // "how did today go" are not that, and still start their own workflows.
+    if (livePack && !startsNewWork(q) && isAboutThePack(q)) {
+      if (/^\s*(draw|illustrate|make a (picture|drawing|illustration))/.test(q)
+          || /\b(picture|illustration|drawing)\b/.test(q)) {
+        return doPackDraw(text.trim());
+      }
+      return doRevise(text.trim());
+    }
     const plan = agenda.find(i => i.intent === 'plan');
     // Asked before the planner check: "what is next on the calendar" is a
     // question about the term, not a request to start next week's planner.
@@ -970,9 +1107,9 @@ export default function App() {
     }
     if (r.kind === 'open_ended' || !r.answer) return boundary();
     if (r.kind === 'general') {
-      return say('notRecords', { text: r.answer });
+      return say('notRecords', { text: r.answer, points: r.points });
     }
-    say('said', { text: r.answer });
+    say('said', { text: r.answer, points: r.points });
   }
 
   function toggleRail() {
@@ -1035,6 +1172,7 @@ export default function App() {
   async function newTask() {
     await loadAgenda();
     pending.current = null;
+    setLivePack(null);                         // a new task is not about the last pack
     setThreadId(null);                         // the next thing said starts a new thread
     setTurns([{ who: 'ai', kind: 'opening' }, { who: 'ai', kind: 'taskMenu' }]);
   }
@@ -1042,6 +1180,9 @@ export default function App() {
   /** Start a workflow from the task menu, naming it in the thread as a click would. */
   function startTask(label: string, run: () => void) {
     said(label);
+    // Picking a task from the menu ends the conversation about whatever was on the
+    // screen, so "add a page" afterwards belongs to the new work, not the old pack.
+    setLivePack(null);
     run();
   }
 
@@ -1054,7 +1195,7 @@ export default function App() {
   }
 
   // ---------- planner ---------------------------------------------------
-  async function doMatch(p: { classId: string; weekNumber: number }) {
+  async function doMatch(p: { classId: string; weekNumber: number; semester?: number }) {
     setBusyPhases(PHASES.match);
     const r = await fetch('/api/plan/match', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(p),
@@ -1072,13 +1213,18 @@ export default function App() {
 
     if (r.registry.uncoded) return say('plannerUncoded', { p });
 
-    const best = r.matches?.[0];
-    if (!best) return say('plannerFirst', { p, refs: r.registry.refs as string[] });
+    // /api/plan/match returns registry.objectives beside registry.refs and always has;
+    // this was the one decision surface still handed the codes alone.
+    const objectives = r.registry.objectives as Objective[] | undefined;
+    const refs = r.registry.refs as string[];
 
-    say('plannerMatch', { p, refs: r.registry.refs as string[], why: best.why, a: best.artefact });
+    const best = r.matches?.[0];
+    if (!best) return say('plannerFirst', { p, refs, objectives });
+
+    say('plannerMatch', { p, refs, objectives, why: best.why, a: best.artefact });
   }
 
-  async function doGenerate(p: { classId: string; weekNumber: number }, mode: string, basisArtifactId?: string) {
+  async function doGenerate(p: { classId: string; weekNumber: number; semester?: number }, mode: string, basisArtifactId?: string) {
     setBusyPhases(mode === 'reuse' ? PHASES.reuse : mode === 'adapt' ? PHASES.adapt : PHASES.plan);
     const r = await fetch('/api/plan/generate', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -1135,7 +1281,96 @@ export default function App() {
     }).then(r => r.json());
     setBusy(null);
     if (r.error) return say('bound', { text: r.message ?? friendly(r.error) });
+    // The conversation is now about this pack, so "shorten the glossary on page 4"
+    // reaches the revise route instead of the school's records (see LivePack).
+    if (r.studyPackId) setLivePack({ id: r.studyPackId, title: r.title });
     say('packCard', { r: r as PackResult });
+  }
+
+  /**
+   * Change a pack that has already been built.
+   *
+   * The whole of "a teacher should be able to ask for a change to something on page 4".
+   * The pack itself is the subject; `material` is anything they attached alongside the
+   * instruction, already extracted to text by /api/studypack/asset.
+   */
+  async function doRevise(instruction: string, material?: string) {
+    const pack = livePack;
+    if (!pack) return;
+    setBusyPhases(PHASES.revise);
+    const r = await fetch('/api/studypack/revise', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ studyPackId: pack.id, instruction, material: material ?? null }),
+    }).then(r => r.json()).catch(() => ({ error: 'offline' }));
+    setBusy(null);
+
+    if (r.error) return say('bound', { text: r.message ?? friendly(r.error) });
+    say('packRevised', {
+      studyPackId: pack.id, note: r.note, pages: r.pages ?? [],
+      revision: r.revision, changed: (r.changed ?? []).length,
+    });
+  }
+
+  /** Put the pack back to an earlier version. Every version is kept, including the
+   *  pack as it was generated, so there is always something to go back to. */
+  async function doRevert(n: number) {
+    const pack = livePack;
+    if (!pack) return;
+    setBusy('Putting it back.');
+    const r = await fetch('/api/studypack/revise', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ studyPackId: pack.id, revertTo: n }),
+    }).then(r => r.json()).catch(() => ({ error: 'offline' }));
+    setBusy(null);
+    if (r.error) return say('bound', { text: r.message ?? friendly(r.error) });
+    say('packRevised', { studyPackId: pack.id, note: r.note, pages: [], revision: r.revision, changed: 0 });
+  }
+
+  /**
+   * Draw something for the pack, then put it on a page.
+   *
+   * Two steps on purpose. The picture is made and stored first, so it exists and has
+   * cost what it costs before anything is asked of the document; then the revision
+   * places it, in the same words the teacher used.
+   */
+  async function doPackDraw(instruction: string) {
+    const pack = livePack;
+    if (!pack) return;
+    setBusyPhases(PHASES.draw);
+    const r = await fetch('/api/studypack/asset', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ studyPackId: pack.id, draw: instruction }),
+    }).then(r => r.json()).catch(() => ({ error: 'offline' }));
+
+    if (r.error) {
+      setBusy(null);
+      return say('bound', { text: r.message ?? friendly(r.error) });
+    }
+    return doRevise(instruction);
+  }
+
+  /**
+   * Files handed to the pack on the screen rather than to a new one.
+   *
+   * A picture becomes something a page can carry; a document becomes material the
+   * revision writes from. The teacher says what to do with it in the same breath.
+   */
+  async function attachToPack(files: File[], instruction: string) {
+    const pack = livePack;
+    if (!pack) return;
+    setBusy('Reading what you sent.');
+    const form = new FormData();
+    form.append('studyPackId', pack.id);
+    for (const f of files) form.append('file', f);
+    const r = await fetch('/api/studypack/asset', { method: 'POST', body: form })
+      .then(r => r.json()).catch(() => ({ error: 'offline' }));
+
+    if (r.error) {
+      setBusy(null);
+      return say('bound', { text: r.message ?? friendly(r.error) });
+    }
+    if (r.refused?.length) say('said', { text: r.refused.join(' ') });
+    return doRevise(instruction, r.material || undefined);
   }
 
   /** Open a stored pack's HTML. `reuse` marks opening an approved pack from the
@@ -1211,10 +1446,20 @@ export default function App() {
    * The teacher's own turn names what they attached before anything is read, so
    * the file is in the conversation the moment they let go of it.
    */
-  function attach(list: FileList | null) {
+  /**
+   * What a teacher attaches, and to what.
+   *
+   * With a pack on the screen the files belong to it: a photograph to put on a page,
+   * a document to write a page from. The composer's own text is the instruction, so
+   * "include this on page 8" and the picture arrive together. With no pack in the
+   * conversation this is where it always went - a file to build a new pack from.
+   */
+  function attach(list: FileList | null, instruction?: string) {
     const files = list ? [...list].slice(0, 5) : [];
     if (!files.length) return;
-    said(files.length === 1 ? files[0].name : `${files.length} files`);
+    const named = files.length === 1 ? files[0].name : `${files.length} files`;
+    said(instruction ? `${instruction} (${named})` : named);
+    if (livePack && instruction?.trim()) return attachToPack(files, instruction.trim());
     return doPackFromUpload(files);
   }
 
@@ -1225,6 +1470,9 @@ export default function App() {
     }).then(r => r.json());
     setBusy(null);
     if (r.error) return say('bound', { text: r.message ?? friendly(r.error) });
+    // The conversation is now about this pack, so "shorten the glossary on page 4"
+    // reaches the revise route instead of the school's records (see LivePack).
+    if (r.studyPackId) setLivePack({ id: r.studyPackId, title: r.title });
     say('packCard', { r: r as PackResult });
   }
 
@@ -1238,10 +1486,10 @@ export default function App() {
 
   /** Search before generate: offer an approved worksheet for the same objectives
    *  to reuse, otherwise build one. */
-  async function doWorksheetMatch(classId: string, weekNumber: number) {
+  async function doWorksheetMatch(classId: string, weekNumber: number, semester = 1) {
     setBusyPhases(PHASES.match);
     const r = await fetch('/api/worksheet/match', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ classId, weekNumber }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ classId, weekNumber, semester }),
     }).then(r => r.json());
     setBusy(null);
 
@@ -1250,15 +1498,15 @@ export default function App() {
     const refs = (r.refs ?? []) as string[];
     const objectives = (r.objectives ?? []) as Objective[];
     const best = r.matches?.[0] as WorksheetMatch | undefined;
-    if (!best) return say('worksheetFirst', { classId, weekNumber, refs, objectives });
+    if (!best) return say('worksheetFirst', { classId, weekNumber, semester, refs, objectives });
 
-    say('worksheetMatch', { classId, weekNumber, refs, objectives, best });
+    say('worksheetMatch', { classId, weekNumber, semester, refs, objectives, best });
   }
 
-  async function doWorksheetGenerate(classId: string, weekNumber: number) {
+  async function doWorksheetGenerate(classId: string, weekNumber: number, semester = 1) {
     setBusyPhases(PHASES.worksheet);
     const r = await fetch('/api/worksheet/generate', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ classId, weekNumber }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ classId, weekNumber, semester }),
     }).then(r => r.json());
     setBusy(null);
     if (r.blocked) return say('bound', { text: r.message });
@@ -1308,11 +1556,11 @@ export default function App() {
     say('homeworkPicker', { classes: cal.classes });
   }
 
-  async function doHomeworkMatch(classId: string, weekNumber: number) {
+  async function doHomeworkMatch(classId: string, weekNumber: number, semester = 1) {
     setBusyPhases(PHASES.match);
     const r = await fetch('/api/homework/match', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ classId, weekNumber }),
+      body: JSON.stringify({ classId, weekNumber, semester }),
     }).then(r => r.json());
     setBusy(null);
 
@@ -1321,16 +1569,16 @@ export default function App() {
     const refs = (r.refs ?? []) as string[];
     const objectives = (r.objectives ?? []) as Objective[];
     const best = r.matches?.[0] as HomeworkMatch | undefined;
-    if (!best) return say('homeworkFirst', { classId, weekNumber, refs, objectives });
+    if (!best) return say('homeworkFirst', { classId, weekNumber, semester, refs, objectives });
 
-    say('homeworkMatch', { classId, weekNumber, refs, objectives, best });
+    say('homeworkMatch', { classId, weekNumber, semester, refs, objectives, best });
   }
 
-  async function doHomeworkGenerate(classId: string, weekNumber: number) {
+  async function doHomeworkGenerate(classId: string, weekNumber: number, semester = 1) {
     setBusyPhases(PHASES.homework);
     const r = await fetch('/api/homework/generate', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ classId, weekNumber }),
+      body: JSON.stringify({ classId, weekNumber, semester }),
     }).then(r => r.json());
     setBusy(null);
     if (r.blocked) return say('bound', { text: r.message });
@@ -1560,7 +1808,11 @@ export default function App() {
         <div className={`thread${dropping ? ' dropping' : ''}`} ref={thread}
              onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
              onDragLeave={e => { if (e.currentTarget === e.target) setDropping(false); }}
-             onDrop={e => { e.preventDefault(); setDropping(false); attach(e.dataTransfer.files); }}>
+             onDrop={e => {
+               e.preventDefault(); setDropping(false);
+               const said = draft.trim(); setDraft('');
+               attach(e.dataTransfer.files, said || undefined);
+             }}>
           <div className="col">
             {turns.map((t, i) => t.who === 'user'
               ? <div key={i} className="turn user"><div className="bub">{t.text}</div></div>
@@ -1584,7 +1836,14 @@ export default function App() {
             <div className="composer">
               <input ref={picker} type="file" className="sr"
                      accept=".pdf,.docx,image/png,image/jpeg,image/webp" multiple
-                     onChange={e => { attach(e.target.files); e.target.value = ''; }} />
+                     onChange={e => {
+                       // Whatever is already typed is the instruction for the files:
+                       // "include this on page 8" and the photograph are one act.
+                       const said = draft.trim();
+                       setDraft('');
+                       attach(e.target.files, said || undefined);
+                       e.target.value = '';
+                     }} />
               <button className="clip" onClick={() => picker.current?.click()}
                       title="Attach a file or a photo of a page"
                       aria-label="Attach a file or a photo of a page">&#128206;</button>
@@ -1725,7 +1984,7 @@ function SearchPalette({ agenda, onClose, onPick, onAgenda }: {
  */
 function PlanPicker({ classes, today, onPick }: {
   classes: ClassCal[]; today: string;
-  onPick: (classId: string, weekNumber: number) => void;
+  onPick: (classId: string, weekNumber: number, semester: number) => void;
 }) {
   const [chosen, setChosen] = useState(classes[0]?.id ?? '');
   const k = classes.find(c => c.id === chosen) ?? classes[0];
@@ -1734,7 +1993,11 @@ function PlanPicker({ classes, today, onPick }: {
   // Weeks already behind the school stay reachable — a late planner is still
   // owed — but the ones ahead come first.
   const weeks = [...k.weeks].sort((a, b) =>
-    Number(b.weekCommencing >= today) - Number(a.weekCommencing >= today) || a.weekNumber - b.weekNumber);
+    Number(b.weekCommencing >= today) - Number(a.weekCommencing >= today)
+    || a.weekCommencing.localeCompare(b.weekCommencing));
+  // Semester 2 has a week 1 as well, so the number alone stopped being an address the
+  // day the calendar carried the whole year. Say which semester where both are offered.
+  const twoSemesters = new Set(weeks.map(w => w.semester)).size > 1;
 
   return (
     <>
@@ -1750,10 +2013,10 @@ function PlanPicker({ classes, today, onPick }: {
         {weeks.map(w => {
           const blocked = !w.signedOff;
           return (
-            <button key={w.weekNumber} className="opt" disabled={blocked}
+            <button key={`${w.semester}-${w.weekNumber}`} className="opt" disabled={blocked}
                     style={blocked ? { opacity: .55, cursor: 'not-allowed' } : undefined}
-                    onClick={() => onPick(k.id, w.weekNumber)}>
-              <b>Week {w.weekNumber}</b>
+                    onClick={() => onPick(k.id, w.weekNumber, w.semester)}>
+              <b>{twoSemesters ? `S${w.semester} · ` : ''}Week {w.weekNumber}</b>
               <small>w/c {WHEN(w.weekCommencing)}</small>
               <small>{blocked ? 'Not signed off yet'
                     : w.status ? (SAYS[w.status] ?? w.status)
@@ -1783,16 +2046,19 @@ function ObjectiveList({ objectives, refs }: { objectives?: Objective[]; refs?: 
   if (!list.length) {
     return (
       <div className="row" style={{ gap: 5, marginTop: 8 }}>
-        {(refs ?? []).map(ref => <span key={ref} className="pill ref">{ref}</span>)}
+        {(refs ?? []).map(ref => <span key={ref} className="code">{ref}</span>)}
       </div>
     );
   }
 
   const SHOWN = 5;
+  // The statement first, the code after it and quiet. A teacher deciding whether to
+  // build this reads what the week asks children to do; the code is what they carry
+  // to a Cambridge overview afterwards, and it was leading the line.
   const row = (o: Objective, i: number) => (
-    <li key={`${o.ref ?? ''}-${i}`} style={{ display: 'flex', gap: 8, alignItems: 'baseline', marginTop: 6 }}>
-      {o.ref && <span className="pill ref" style={{ flex: 'none' }}>{o.ref}</span>}
+    <li key={`${o.ref ?? ''}-${i}`} style={{ display: 'flex', gap: 7, alignItems: 'baseline', marginTop: 6 }}>
       <span style={{ fontSize: 13.5 }}>{o.text}</span>
+      {o.ref && <span className="code" style={{ flex: 'none' }}>{o.ref}</span>}
     </li>
   );
 
@@ -1934,19 +2200,29 @@ function RegistryTurn({ r, onSignOff }: {
  */
 function StudyPackPicker({ classes, today, onPick, onUpload }: {
   classes: ClassCal[]; today: string;
-  onPick: (classId: string, weekFrom: number, weekTo: number) => void;
+  onPick: (classId: string, weekFrom: number, weekTo: number, semester: number) => void;
   onUpload: () => void;
 }) {
   const [chosen, setChosen] = useState(classes[0]?.id ?? '');
   const k = classes.find(c => c.id === chosen) ?? classes[0];
 
   // Only signed-off teaching weeks can seed a pack (Addendum C §C7).
-  const weeks = k ? k.weeks.filter(w => w.signedOff).sort((a, b) => a.weekNumber - b.weekNumber) : [];
+  const all = k ? k.weeks.filter(w => w.signedOff) : [];
+  // A pack covers a run of weeks, and a run cannot cross a semester: both semesters
+  // number their weeks from 1, so "weeks 10 to 2" is not a span, it is two spans.
+  // The picker offers one semester at a time and defaults to the one being taught.
+  const semesters = [...new Set(all.map(w => w.semester))].sort();
+  const [semester, setSemester] = useState<number>(() => {
+    const current = all.find(w => w.weekCommencing >= today)?.semester;
+    return current ?? semesters[0] ?? 1;
+  });
+  const weeks = all.filter(w => w.semester === semester)
+    .sort((a, b) => a.weekNumber - b.weekNumber);
   const [from, setFrom] = useState<number | null>(null);
   const [to, setTo] = useState<number | null>(null);
 
-  // Reset the span whenever the class changes — its signed-off weeks differ.
-  useEffect(() => { setFrom(null); setTo(null); }, [chosen]);
+  // Reset the span whenever the class or the semester changes — the weeks differ.
+  useEffect(() => { setFrom(null); setTo(null); }, [chosen, semester]);
 
   if (!k) return null;
 
@@ -1969,6 +2245,17 @@ function StudyPackPicker({ classes, today, onPick, onUpload }: {
           </button>
         ))}
       </div>
+
+      {semesters.length > 1 && (
+        <div className="row" style={{ marginTop: 8, gap: 7 }}>
+          {semesters.map(sem => (
+            <button key={sem} className={`chip ${sem === semester ? 'key' : ''}`}
+                    onClick={() => setSemester(sem)}>
+              Semester {sem}
+            </button>
+          ))}
+        </div>
+      )}
 
       {!weeks.length ? (
         <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 12 }}>
@@ -2002,7 +2289,7 @@ function StudyPackPicker({ classes, today, onPick, onUpload }: {
           </div>
           <div className="acts" style={{ marginTop: 13 }}>
             <button className="btn primary" disabled={!ready}
-                    onClick={() => ready && onPick(k.id, from!, to!)}>
+                    onClick={() => ready && onPick(k.id, from!, to!, semester)}>
               {ready ? `Find or build weeks ${from}-${to}` : 'Pick a start and end week'}
             </button>
           </div>
@@ -2016,9 +2303,12 @@ function StudyPackPicker({ classes, today, onPick, onUpload }: {
  * The generated pack, summarised. Objectives come from the registry; the pedagogy
  * is the model's. A pack enters the shared bank only once a reviewer approves it.
  */
-function PackCard({ r, onOpen, onPdf, onApprove }: {
+function PackCard({ r, onOpen, onPdf, onApprove, onAsk }: {
   r: PackResult; onOpen: () => void; onPdf: () => void; onApprove: () => void;
+  /** Absent on a pack that cannot be changed - one built before revisions existed. */
+  onAsk?: (instruction: string) => void;
 }) {
+  const [ask, setAsk] = useState('');
   const parts = r.pages?.length
     ? r.pages.map(p => ({ label: p.title, count: p.blocks, noun: 'section' }))
     : r.units.map(u => ({ label: u.label, count: u.topics, noun: 'topic' }));
@@ -2054,8 +2344,8 @@ function PackCard({ r, onOpen, onPdf, onApprove }: {
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
             {fromFile.map((o, i) => (
               <li key={i}>
-                {o.ref ? <span className="pill ref">{o.ref}</span> : <span className="pill warn">no code</span>}{' '}
-                {o.text}
+                {o.text}{' '}
+                {o.ref ? <span className="code">{o.ref}</span> : <span className="pill warn">no code</span>}
                 {o.source === 'matched' && <span style={{ color: 'var(--muted)' }}> (matched to the curriculum by wording)</span>}
               </li>
             ))}
@@ -2068,6 +2358,34 @@ function PackCard({ r, onOpen, onPdf, onApprove }: {
         <button className="btn" onClick={onOpen}>Open the study pack</button>
         <button className="btn" onClick={onPdf}>Download printable PDF</button>
       </div>
+
+      {/*
+        Say what to change, here rather than only in the composer.
+
+        A teacher who has just been handed a document has no way of knowing they may
+        argue with it, and a capability nobody discovers is a capability nobody has.
+        The composer takes the same words (see isAboutThePack) - this is the door.
+      */}
+      {onAsk && (
+        <form
+          className="revise"
+          onSubmit={e => {
+            e.preventDefault();
+            const text = ask.trim();
+            if (!text) return;
+            setAsk('');
+            onAsk(text);
+          }}
+        >
+          <input
+            value={ask}
+            onChange={e => setAsk(e.target.value)}
+            placeholder="Change something - &ldquo;shorten the glossary on page 4&rdquo;"
+            aria-label="Ask for a change to this pack"
+          />
+          <button className="btn" type="submit" disabled={!ask.trim()}>Ask</button>
+        </form>
+      )}
     </>
   );
 }
@@ -2078,14 +2396,17 @@ function PackCard({ r, onOpen, onPdf, onApprove }: {
  * this asks for one week rather than a range.
  */
 function WorksheetPicker({ classes, onPick, asks }: {
-  classes: ClassCal[]; onPick: (classId: string, weekNumber: number) => void;
+  classes: ClassCal[]; onPick: (classId: string, weekNumber: number, semester: number) => void;
   /** Homework and a worksheet are picked identically - a class, then a signed-off
    *  week - so they share this, and only the question changes. */
   asks?: string;
 }) {
   const [chosen, setChosen] = useState(classes[0]?.id ?? '');
   const k = classes.find(c => c.id === chosen) ?? classes[0];
-  const weeks = k ? k.weeks.filter(w => w.signedOff).sort((a, b) => a.weekNumber - b.weekNumber) : [];
+  const weeks = k
+    ? k.weeks.filter(w => w.signedOff).sort((a, b) => a.weekCommencing.localeCompare(b.weekCommencing))
+    : [];
+  const twoSemesters = new Set(weeks.map(w => w.semester)).size > 1;
 
   if (!k) return null;
 
@@ -2106,8 +2427,9 @@ function WorksheetPicker({ classes, onPick, asks }: {
       ) : (
         <div className="opts" style={{ marginTop: 13 }}>
           {weeks.map(w => (
-            <button key={w.weekNumber} className="opt" onClick={() => onPick(k.id, w.weekNumber)}>
-              <b>Week {w.weekNumber}</b>
+            <button key={`${w.semester}-${w.weekNumber}`} className="opt"
+                    onClick={() => onPick(k.id, w.weekNumber, w.semester)}>
+              <b>{twoSemesters ? `S${w.semester} · ` : ''}Week {w.weekNumber}</b>
               <small>w/c {WHEN(w.weekCommencing)}</small>
               <small>{w.topic ? w.topic.slice(0, 48) : 'Signed off'}</small>
             </button>
@@ -2379,7 +2701,7 @@ function SourceResult({ result, onBuild, noun }: {
         <>
           <div className="eyebrow" style={{ marginBottom: 5 }}>Resolved - these seed the pack</div>
           <div className="row" style={{ gap: 5 }}>
-            {result.resolved.map(o => <span key={o.ref} className="pill ref">{o.ref}</span>)}
+            {result.resolved.map(o => <span key={o.ref} className="code">{o.ref}</span>)}
           </div>
         </>
       )}
@@ -2660,8 +2982,8 @@ function PlannerCard({ r, mode, onSubmit, openFolds, setOpenFolds }: {
                 </td>
                 <td>{l.objectives.map((o, j) => (
                   <div key={j} className="obj">
-                    {o.ref ? <span className="pill ref">{o.ref}</span> : <span className="pill warn">no syllabus ref</span>}
                     <p>{o.text}</p>
+                    {o.ref ? <span className="code">{o.ref}</span> : <span className="pill warn">no syllabus ref</span>}
                   </div>
                 ))}</td>
                 <td>

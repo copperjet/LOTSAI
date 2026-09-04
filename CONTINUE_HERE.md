@@ -1,6 +1,6 @@
 # LOTS AI — Continuation Plan
 
-Last worked: 2026-08-30. Everything below is verified working unless marked otherwise.
+Last worked: 2026-09-04. Everything below is verified working unless marked otherwise.
 
 ## Where we are
 
@@ -31,6 +31,8 @@ is, three things degrade rather than fail, on purpose:
 - a study pack PDF that fell back to the plain pdf-lib rendering cannot say so.
 Paste `supabase/migrations/0015_threads_homework.sql` into the SQL editor to switch them on.
 
+**0017 (study pack revisions and assets) is written and NOT applied** — see the 2026-09-04 section below.
+
 **0016 (`school_fact`) is applied and verified end to end** (2026-09-02). It holds what the school
 knows about itself that no other table does - the uniform policy, the safeguarding lead, how work
 is marked - and `lib/ask.ts` puts it in the grounding block beside the calendar, so a teacher asks
@@ -55,6 +57,88 @@ and `subject.department` are free text on two different vocabularies right now -
 `Primary`, subjects are in `Mathematics`/`Science`/`English`/`Humanities` - so **no subject
 resolves to an HOD**. The model says so rather than guessing, which is right but not useful.
 Align the two vocabularies at `/admin/people` to switch that on; no code change is needed.
+
+## 2026-09-04 — study pack design, artefact revision, chat legibility
+
+Five things a teacher raised, all done. Read the first two before touching a pack.
+
+### 1. The printable PDF was a failed render, not a design
+
+`study_pack.render_note` said it outright:
+
+```
+The input directory "/var/task/node_modules/@sparticuz/chromium/bin" does not exist.
+```
+
+`@sparticuz/chromium` was already in `serverExternalPackages`, which is necessary and was
+not sufficient: it unpacks `chromium.br` from its own `bin/` at run time by a path it
+builds itself, and a path nothing imports is a path Next's tracer cannot see. So `bin/`
+was never copied into the lambda, every print in production fell back to the plain
+pdf-lib rendering (`lib/pdf/renderers/studypack_print.ts`), and it worked locally because
+a real Chrome is on disk and the package is never asked for its binary at all.
+
+Fixed with `outputFileTracingIncludes` in `next.config.mjs`, for the three routes that can
+reach `printHtmlToPdf`: `/api/studypack/pdf`, `/api/studypack/approve`, `/api/homework/approve`.
+**Verify on the first deploy**: build a pack, press Download printable PDF, and check
+`render_note` is null. It adds 67 MB to each of those functions.
+
+The fallback is no longer foreign either: it takes the pack's own two colours, and it
+says on its first page that it is the plain rendering.
+
+### 2. Themes
+
+`lib/studypack/themes.ts` is new and carries eight complete looks - palette, type,
+cover composition, header band, card treatment, radius. A pack's theme is chosen at
+generation from the subject (which fixes a family of three) and the pack's own span
+(which moves within it), and stored on `content.theme`. A pack with no theme renders
+as `oaktree-forest`, which is the design that existed before, so nothing already in the
+bank changes.
+
+`Accent` still reads forest/purple/teal/blue/gold and the model still chooses from those
+five - they are slot names now, and the theme decides what a slot looks like. The markup
+says `accent-1`..`accent-5`.
+
+`GET /api/theme-preview` renders a sample pack in any theme, and with no query lists them
+all. It is a bench for signing off a palette; delete it when nobody is looking at themes.
+
+New page furniture: divider sheets (`Page.role`), lettered tiles on key-notes cards,
+an answer bar under a worked example, and a `diagram` block - flow, cycle, number line,
+bar model, grid - drawn as SVG the way `chart` already was.
+
+### 3. Talking to a pack
+
+`POST /api/studypack/revise` changes a built pack: it rewrites the BLOCKS on a page and
+never the objectives, then re-runs the gate. `POST /api/studypack/asset` takes pictures
+and documents for it, and draws a picture on request (`lib/llm.ts` `generateImage`, priced
+per image in `IMAGE_PRICE`, metered like everything else). In the UI the pack card carries
+a "Change something" box, and once a pack is on the screen the composer routes changes to
+it (`LivePack` in `app/page.tsx`).
+
+**Migration 0017 is written and NOT applied.** Until it is, revisions still happen and the
+pack still re-renders - what is missing is the version history (the reply says no version
+number and offers no Undo) and pictures, which refuse with the store's own error. Paste
+`supabase/migrations/0017_studypack_revisions_assets.sql` into the SQL editor.
+
+### 4 and 5. Objectives and chat shape
+
+An objective is stated in words wherever a teacher decides something, with the code after
+it, small and quiet (`.code`, not `.pill.ref`). The pack cover still lists every code in
+full, because that is what sign-off and coverage read.
+
+`lib/ask.ts` now returns `points` beside `answer`, and `Said` in `app/page.tsx` lays them
+out. There is still no markdown parser and there should not be one: structured JSON is how
+every other answer in this application travels and it cannot put a model's markup on the
+page.
+
+### Two bugs found while verifying, both fixed
+
+- `stripTags` erased any value that was a number and nothing else (`/^[\d,\s]+$/`, meant
+  for a stray list of objective indices). A worked example answering "1482" printed ANSWER
+  over an empty bar, and quiz options "5", "6", "7" were emptied and then filtered out -
+  which moved `correct` and marked the wrong answer right. It now needs three numbers.
+- `.print-only` lost the cascade to `.sheet` and `.grid`, so the answer key and the printed
+  copy of every glossary were on screen the whole time. A pack a learner opened showed
+  them the answers.
 
 ## Environment / gotchas (READ FIRST)
 

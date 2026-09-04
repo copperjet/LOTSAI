@@ -4,6 +4,11 @@ node_modules
 .env*.local
 .vercel
 supabase/seed/*.json
+# ...except the calendar, which is written by hand rather than generated. Both
+# scripts/seed.mjs and scripts/ingest_overviews.py read it, so a checkout without it
+# cannot seed or import at all. curriculum.json and readiness_report.json stay ignored:
+# those are output of `npm run ingest` and one of them is 790 KB.
+!supabase/seed/calendar.json
 tsconfig.tsbuildinfo
 .gatecheck
 

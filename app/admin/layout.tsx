@@ -41,6 +41,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <Link href="/admin/people">People</Link>
           <Link href="/admin/classes">Classes</Link>
           <Link href="/admin/curriculum">Curriculum</Link>
+          <Link href="/admin/knowledge">Knowledge</Link>
           <Link href="/admin/activity">Activity</Link>
           <Link href="/admin/health">Health</Link>
           <Link href="/" className="aback">Back to LOTS AI</Link>

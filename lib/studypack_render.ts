@@ -14,6 +14,7 @@ import type { PackContent } from './studypack';
 import { renderStudyPackHtml } from './studypack_html';
 import { renderPackHtml } from './studypack/render_html';
 import type { PackV2 } from './studypack/schema';
+import { loadAssets } from './studypack/assets';
 
 export async function renderStudyPack(studyPackId: string): Promise<Uint8Array> {
   const db = admin();
@@ -22,8 +23,12 @@ export async function renderStudyPack(studyPackId: string): Promise<Uint8Array> 
   if (!pack) throw new Error(`No study pack ${studyPackId}`);
 
   const content = pack.content as Partial<PackV2>;
+  // The pack's own pictures, inlined. A pack with none pays one query for an empty
+  // object; a pack with some has to carry them in the document, because the print has
+  // no session to fetch them with (lib/studypack/assets.ts).
+  const assets = Number(content?.version) === 2 ? await loadAssets(studyPackId) : {};
   const html = Number(content?.version) === 2
-    ? renderPackHtml(content as PackV2)
+    ? renderPackHtml(content as PackV2, { assets })
     : renderStudyPackHtml(pack.content as PackContent, {
         subject: pack.subject_id, yearGroup: pack.year_group,
         weekFrom: pack.week_from, weekTo: pack.week_to,

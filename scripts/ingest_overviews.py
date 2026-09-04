@@ -70,14 +70,34 @@ SUBJECT_HINTS = {
     'P.E':'Physical Education', 'PHYSICAL EDUCATION':'Physical Education', 'PE ':'Physical Education',
 }
 
-# Semester 1 2026/27, Mondays. The calendar is the single source of truth
-# (Addendum A Section A9) — overview dates are matched to it, never the reverse.
-WEEK_MONDAYS = {
-    1:'2026-08-24',  2:'2026-08-31',  3:'2026-09-07',  4:'2026-09-14',  5:'2026-09-21',
-    6:'2026-09-28',  7:'2026-10-05',  8:'2026-10-12',  9:'2026-10-26', 10:'2026-11-02',
-    11:'2026-11-09', 12:'2026-11-16', 13:'2026-11-23', 14:'2026-11-30',
-}
-TEACHING_WEEKS = set(range(1, 12))   # 11 teaching weeks; 12 is revision, 13-14 exams
+# The calendar is the single source of truth (Addendum A Section A9) — overview dates
+# are matched to it, never the reverse. It is read from supabase/seed/calendar.json,
+# which scripts/load_calendar.mjs also writes to the database.
+#
+# This used to be a dict written out here, and scripts/seed.mjs held a second one. They
+# disagreed from the midterm break onward: the seed counted the break as week 9 and this
+# file skipped it, so every week from 9 on meant one date to the importer and another to
+# the app. Neither was wrong on its own, which is exactly why nobody noticed.
+CALENDAR_PATH = Path(__file__).resolve().parent.parent / 'supabase' / 'seed' / 'calendar.json'
+
+try:
+    _calendar = json.loads(CALENDAR_PATH.read_text(encoding='utf-8'))
+except FileNotFoundError:
+    sys.exit(f"no calendar at {CALENDAR_PATH} — it is the source of week dates")
+
+# Week numbers repeat across semesters, so both are keyed by (semester, week).
+WEEK_MONDAYS = {(w['semester'], w['week']): w['commencing'] for w in _calendar['weeks']}
+TEACHING_WEEKS = {(w['semester'], w['week']) for w in _calendar['weeks'] if w['type'] == 'teaching'}
+
+
+def week_monday(semester, week):
+    """The Monday of a week, or None where the calendar has no such week.
+
+    An overview that runs to week 16 of a 15 week semester is stating something the
+    calendar does not have. That is worth reporting rather than dating silently, so the
+    row imports with no date and the readiness report carries it.
+    """
+    return WEEK_MONDAYS.get((semester or 1, week))
 
 
 FOLDER_YEAR = {'ACORNS': 'Acorns', 'NURSERY': 'EY1', 'MIDDLE': 'EY2', 'RECEPTION': 'EY3',
@@ -265,8 +285,10 @@ def emit_row(wk, obj_text, act_text='', res_cells=None):
         res = tail[1].split('\n') if len(tail) > 1 else []
     return {
         'week': wk,
-        'week_commencing': WEEK_MONDAYS.get(wk),
-        'is_teaching_week': wk in TEACHING_WEEKS,
+        # Filled in once the semester is known (parse_row does not see it), by
+        # date_rows() below.
+        'week_commencing': None,
+        'is_teaching_week': None,
         'topic_label': topic.strip(),
         'objectives': objs,
         'activities': [a.strip(' 0123456789.•') for a in act_text.split('\n') if a.strip()],
@@ -435,6 +457,12 @@ def main():
                            'file': str(chosen.relative_to(root)), 'why': notes[0] if notes else 'no rows'})
             continue
         for r in rows:
+            # The Monday, now that the semester is known. A semester of 0 means the file
+            # covers both, and its week numbers are read as semester 1's - which is what
+            # the school's own "Week 5" means in a whole-year overview.
+            week_sem = sem if sem in (1, 2) else 1
+            r['week_commencing'] = week_monday(week_sem, r['week'])
+            r['is_teaching_week'] = (week_sem, r['week']) in TEACHING_WEEKS
             weeks.append({'academic_year': args.year, 'year_group': yg, 'subject': subj,
                           'semester': sem, 'source_file': str(chosen.relative_to(root)), **r})
 

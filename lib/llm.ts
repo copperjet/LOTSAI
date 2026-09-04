@@ -70,6 +70,19 @@ const PRICE: Record<string, { in: number; out: number }> = {
 };
 
 /**
+ * USD per generated image, by model and size.
+ *
+ * Images are not billed in tokens, so they cannot go through PRICE - but they go
+ * through the same rule: a model with no price here records zero and says so in the
+ * log, because a gap in the ledger is visible and an invented figure is not (Addendum
+ * D section D8).
+ */
+const IMAGE_PRICE: Record<string, number> = {
+  'gpt-image-1': 0.04,        // 1024x1024, quality "medium"
+  'gpt-image-1-mini': 0.011,
+};
+
+/**
  * A model with no price is loud and costs zero. It used to fall back to
  * {in:2,out:10}, which wrote a plausible but wrong number into ai_usage —
  * precisely the estimate the spec forbids. A gap in the ledger is visible;
@@ -114,6 +127,31 @@ export interface CallOpts {
    * prefix over a few hours, so the standard/exemplar prefix earns the long TTL.
    */
   longCache?: boolean;
+}
+
+/**
+ * What a picture costs to draw.
+ *
+ * The image model is named here rather than in TIER because it is not a tier of the
+ * same thing: a study pack's text is written by the standard tier and its
+ * illustrations are drawn by an image model, and the two move independently.
+ */
+export const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-1-mini';
+
+export interface ImageOpts {
+  /** What to draw. Written by the application from the teacher's own words. */
+  prompt: string;
+  workflow: string;
+  userId?: string | null;
+  /** Square by default: a pack lays pictures out in a half-page column. */
+  size?: '1024x1024' | '1536x1024' | '1024x1536';
+}
+
+export interface ImageResult {
+  /** PNG bytes. */
+  bytes: Uint8Array;
+  contentType: string;
+  usage: { cost: number; model: string; ms: number };
 }
 
 export interface CallResult<T = unknown> {
@@ -177,6 +215,59 @@ export async function call<T = unknown>(o: CallOpts): Promise<CallResult<T>> {
   } catch {
     throw new Error(`${o.workflow}: model returned unparseable JSON`);
   }
+}
+
+/**
+ * Draw a picture.
+ *
+ * Separate from `call` because it returns bytes rather than text and is priced per
+ * image rather than per token, and shares everything else that matters: server-side
+ * only, one metered row per call, and the provider a detail.
+ *
+ * Deliberately never called during generation. A picture belongs to a pack because a
+ * teacher asked for one (app/api/studypack/revise/route.ts) - it costs real money per
+ * page, it is the one part of a pack that cannot be checked by reading it, and a
+ * generated illustration is the wrong answer far more often than a diagram is
+ * (lib/studypack/schema.ts, DiagramBlock).
+ */
+export async function generateImage(o: ImageOpts): Promise<ImageResult> {
+  const started = Date.now();
+
+  if (MOCK()) {
+    const { mockImage } = await import('./mocks');
+    const bytes = mockImage();
+    const usage = { cost: 0, model: 'mock', ms: Date.now() - started };
+    await meterImage(o, 'mock', 'mock', 0, usage.ms);
+    return { bytes, contentType: 'image/png', usage };
+  }
+
+  // Only OpenAI draws today. Anthropic has no image generation, and falling back to
+  // text silently would put a paragraph where a picture was asked for.
+  const { image } = await import('./providers/openai');
+  const model = IMAGE_MODEL;
+  const bytes = await image(o, model);
+
+  const cost = IMAGE_PRICE[model] ?? 0;
+  if (!IMAGE_PRICE[model]) {
+    console.error(`[llm] no price for image model "${model}" - recording cost 0. `
+      + 'Add it to IMAGE_PRICE in lib/llm.ts.');
+  }
+  const ms = Date.now() - started;
+  await meterImage(o, 'openai', model, cost, ms);
+  return { bytes, contentType: 'image/png', usage: { cost, model, ms } };
+}
+
+/** One ai_usage row per image, with no token counts - there are none to report. */
+async function meterImage(
+  o: ImageOpts, provider: string, model: string, cost: number, ms: number,
+) {
+  const { error } = await admin().from('ai_usage').insert({
+    workflow: o.workflow, provider, model,
+    user_id: o.userId ?? null,
+    input_tokens: 0, cached_tokens: 0, output_tokens: 0,
+    cost_usd: cost, latency_ms: ms,
+  });
+  if (error) console.error(`[llm] ai_usage insert failed for ${o.workflow}/${model}: ${error.message}`);
 }
 
 async function meter(

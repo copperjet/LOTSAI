@@ -20,8 +20,8 @@ export async function POST(req: NextRequest) {
   if (!q) return NextResponse.json({ error: 'question required' }, { status: 400 });
 
   try {
-    const { kind, answer } = await askAboutSchool(q, user);
-    return NextResponse.json({ kind, answer });
+    const { kind, answer, points } = await askAboutSchool(q, user);
+    return NextResponse.json({ kind, answer, points });
   } catch (e) {
     // A question that cannot be answered must not look like a question that was
     // refused: the boundary card is a statement about scope, and this is a fault.

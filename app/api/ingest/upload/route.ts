@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
 import { reconcile } from '@/lib/ingest/reconcile';
-import { extractTextFromImage, isImageType } from '@/lib/ingest/ocr';
+import { kindOf, extractFile, MAX_IMAGE_BYTES, type Kind } from '@/lib/ingest/extract';
 import { cleanText, sourceNote, MAX_STORED_TEXT } from '@/lib/ingest/source';
 
 export const runtime = 'nodejs';
@@ -23,11 +23,7 @@ export const maxDuration = 120;
  * yielding one study pack rather than three.
  */
 
-/** Beyond this a photograph is a scan, and base64 of it is a request nobody wants. */
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 5;
-
-type Kind = 'pdf' | 'docx' | 'image';
 
 export async function POST(req: NextRequest) {
   const db = admin();
@@ -67,12 +63,9 @@ export async function POST(req: NextRequest) {
   const parts: { filename: string; kind: Kind; textLength: number }[] = [];
   const texts: string[] = [];
   for (const { file, kind } of jobs) {
-    const bytes = new Uint8Array(await file.arrayBuffer());
     let text: string;
     try {
-      text = kind === 'pdf' ? await extractPdf(bytes)
-        : kind === 'docx' ? await extractDocx(bytes)
-        : (await extractTextFromImage(bytes, file.type, user.id)).text;
+      text = await extractFile(file, kind, user.id);
     } catch (e) {
       console.error(`[upload] ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
       return NextResponse.json({
@@ -131,33 +124,4 @@ export async function POST(req: NextRequest) {
       subjectId, yearGroup,
     }),
   });
-}
-
-function kindOf(file: File): Kind | null {
-  const name = file.name.toLowerCase();
-  if (name.endsWith('.pdf')) return 'pdf';
-  if (/\.docx?$/.test(name)) return 'docx';
-  if (isImageType(file.type)) return 'image';
-  return null;
-}
-
-
-/** PDF text via pdfjs (legacy build runs in Node; no worker needed for text). */
-async function extractPdf(bytes: Uint8Array): Promise<string> {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const doc = await pdfjs.getDocument({ data: bytes, useSystemFonts: true, isEvalSupported: false }).promise;
-  let text = '';
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    text += (content.items as { str?: string }[]).map(it => it.str ?? '').join(' ') + '\n';
-  }
-  return text;
-}
-
-/** DOCX raw text via mammoth. */
-async function extractDocx(bytes: Uint8Array): Promise<string> {
-  const mammoth = await import('mammoth');
-  const { value } = await mammoth.extractRawText({ buffer: Buffer.from(bytes) });
-  return value;
 }

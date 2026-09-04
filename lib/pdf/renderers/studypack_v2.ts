@@ -16,8 +16,9 @@ import { rgb, RGB, PDFFont } from 'pdf-lib';
 import {
   A4, Margins, Fonts, Cursor, DocCtx, newDoc, newPage, wrapText, drawText, truncateToWidth,
 } from '@/lib/pdf/layout';
-import { FOREST, GOLD, drawHeader, drawInfoStrip, drawFooterOnAllPages } from '@/lib/pdf/branding';
+import { drawHeader, drawInfoStrip, drawFooterOnAllPages } from '@/lib/pdf/branding';
 import type { Block, PackV2 } from '@/lib/studypack/schema';
+import { themeById } from '@/lib/studypack/themes';
 
 const INK = rgb(0.12, 0.12, 0.15);
 const MUTED = rgb(0.42, 0.42, 0.47);
@@ -29,6 +30,30 @@ const TONE_BG: Record<string, RGB> = {
 };
 const CONTENT_W = A4.width - Margins.left - Margins.right;
 const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+/**
+ * The two colours this rendering uses, taken from the pack's own theme.
+ *
+ * The school crest, the header bar and the footer stay the school's forest and gold
+ * (lib/pdf/branding.ts) - they are the institution, not the document, and the planner
+ * and the worksheet carry the same ones. What changes here is only what the pack
+ * itself is coloured in, so a plain rendering of a navy pack is not a green one.
+ *
+ * Passed rather than held at module scope: two packs can be rendering in the same
+ * process, and a palette in a module variable is the first thing to be read by the
+ * wrong one.
+ */
+interface Palette { accent: RGB; mark: RGB }
+
+function hex(h: string): RGB {
+  const n = parseInt(h.replace('#', ''), 16);
+  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+}
+
+function paletteFor(pack: PackV2): Palette {
+  const t = themeById(pack.theme);
+  return { accent: hex(t.slots[0].c1), mark: hex(t.mark) };
+}
 
 /** A question is worked on paper, so it needs paper to be worked on. */
 const DEFAULT_ANSWER_LINES = 3;
@@ -47,12 +72,12 @@ function para(ctx: DocCtx, cur: Cursor, text: string, font: PDFFont,
 }
 
 /** A forest section heading with a hairline under it. */
-function heading(ctx: DocCtx, cur: Cursor, text: string): void {
+function heading(ctx: DocCtx, cur: Cursor, pal: Palette, text: string): void {
   cur.ensure(Fonts.subheadSize * Fonts.lineHeight + 14);
   cur.advance(8);
   for (const line of wrapText(ctx.bold, text, Fonts.subheadSize, CONTENT_W)) {
     drawText(cur.page, line, Margins.left, cur.y - Fonts.subheadSize,
-      { font: ctx.bold, size: Fonts.subheadSize, color: FOREST });
+      { font: ctx.bold, size: Fonts.subheadSize, color: pal.accent });
     cur.advance(Fonts.subheadSize * Fonts.lineHeight);
   }
   cur.advance(2);
@@ -64,10 +89,10 @@ function heading(ctx: DocCtx, cur: Cursor, text: string): void {
 }
 
 /** A small gold eyebrow label (Key ideas / Practice questions). */
-function label(ctx: DocCtx, cur: Cursor, text: string): void {
+function label(ctx: DocCtx, cur: Cursor, pal: Palette, text: string): void {
   cur.ensure(Fonts.smallSize * Fonts.lineHeight + 2);
   drawText(cur.page, text.toUpperCase(), Margins.left, cur.y - Fonts.smallSize,
-    { font: ctx.bold, size: Fonts.smallSize - 1, color: GOLD });
+    { font: ctx.bold, size: Fonts.smallSize - 1, color: pal.mark });
   cur.advance(Fonts.smallSize * Fonts.lineHeight);
 }
 
@@ -83,7 +108,9 @@ function label(ctx: DocCtx, cur: Cursor, text: string): void {
  */
 export async function renderPackPdfV2(
   pack: PackV2, meta: { subject: string; yearGroup: string; weeks: string },
+  opts: { plain?: boolean } = {},
 ): Promise<Uint8Array> {
+  const pal = paletteFor(pack);
   // Homework and worksheets are composed as packs too, so the document says what it
   // actually is rather than calling every one of them a study pack.
   const title = `${pack.kind ?? 'Study Pack'} - ${pack.title}`;
@@ -96,16 +123,29 @@ export async function renderPackPdfV2(
     ['Objectives', String(pack.objectives?.length ?? 0)],
   ]);
 
-  para(ctx, cur, pack.title, ctx.bold, Fonts.subheadSize, FOREST, 0, 3);
+  para(ctx, cur, pack.title, ctx.bold, Fonts.subheadSize, pal.accent, 0, 3);
   if (pack.subtitle) para(ctx, cur, pack.subtitle, ctx.italic, Fonts.bodySize, MUTED, 0, 4);
   para(ctx, cur, 'A printable revision companion. Work through the questions; the answer key is at the end.',
     ctx.italic, Fonts.smallSize, MUTED, 0, 8);
 
+  // Say so on the document itself.
+  //
+  // This rendering only ever exists because the designed one could not be printed,
+  // and a teacher holding it has no way to tell that from a design decision. The chat
+  // says which PDF it is (app/api/studypack/pdf/route.ts); the file did not, and the
+  // file is what ends up on a desk and in Drive.
+  if (opts.plain) {
+    para(ctx, cur,
+      'This is the plain rendering. The designed pack could not be printed this time - '
+      + 'open the study pack and print from there for the full version.',
+      ctx.italic, Fonts.smallSize, pal.mark, 0, 8);
+  }
+
   // Every objective, in full, as the pack's own cover carries them.
   if (pack.objectives?.length) {
-    heading(ctx, cur, 'Objectives');
+    heading(ctx, cur, pal, 'Objectives');
     for (const o of pack.objectives) {
-      para(ctx, cur, `${o.ref ? `${o.ref}  ` : ''}${o.text}`, ctx.regular, Fonts.smallSize, INK, 0, 2);
+      para(ctx, cur, `${o.text}${o.ref ? `  (${o.ref})` : ''}`, ctx.regular, Fonts.smallSize, INK, 0, 2);
     }
   }
 
@@ -115,7 +155,7 @@ export async function renderPackPdfV2(
   let qNum = 0;
 
   for (const page of pack.pages ?? []) {
-    heading(ctx, cur, page.eyebrow ? `${page.eyebrow} - ${page.title}` : page.title);
+    heading(ctx, cur, pal, page.eyebrow ? `${page.eyebrow} - ${page.title}` : page.title);
 
     const objs = (page.objective_indexes ?? []).map(i => pack.objectives?.[i]).filter(Boolean);
     for (const o of objs) {
@@ -124,7 +164,7 @@ export async function renderPackPdfV2(
     if (objs.length) cur.advance(3);
 
     for (const block of page.blocks ?? []) {
-      qNum = drawBlock(ctx, cur, block, pack, qNum, key);
+      qNum = drawBlock(ctx, cur, pal, block, pack, qNum, key);
     }
   }
 
@@ -132,7 +172,7 @@ export async function renderPackPdfV2(
   if (key.length) {
     cur.page = newPage(ctx);
     cur.y = A4.height - Margins.top;
-    heading(ctx, cur, 'Answer key');
+    heading(ctx, cur, pal, 'Answer key');
     para(ctx, cur, 'Questions are numbered in the order they appear above.', ctx.italic, Fonts.smallSize, MUTED, 0, 6);
     for (const a of key) {
       para(ctx, cur, `${a.n}.  ${a.correct}${a.explain ? ` - ${a.explain}` : ''}`, ctx.regular, Fonts.bodySize, INK, 0, 2);
@@ -145,15 +185,15 @@ export async function renderPackPdfV2(
 
 /** Draw one block. Returns the running quiz number, which only a quiz advances. */
 function drawBlock(
-  ctx: DocCtx, cur: Cursor, b: Block, pack: PackV2,
+  ctx: DocCtx, cur: Cursor, pal: Palette, b: Block, pack: PackV2,
   qNum: number, key: { n: number; correct: string; explain: string }[],
 ): number {
   switch (b.type) {
     case 'resources':
-      label(ctx, cur, 'Helpful resources');
+      label(ctx, cur, pal, 'Helpful resources');
       if (b.intro) para(ctx, cur, b.intro, ctx.italic, Fonts.bodySize, MUTED, 0, 4);
       for (const g of b.groups ?? []) {
-        para(ctx, cur, g.label, ctx.bold, Fonts.smallSize, FOREST, 0, 2);
+        para(ctx, cur, g.label, ctx.bold, Fonts.smallSize, pal.accent, 0, 2);
         for (const i of g.items ?? []) {
           para(ctx, cur, `${i.name}${i.why ? ` - ${i.why}` : ''}${i.url ? ` (${i.url})` : ''}`,
             ctx.regular, Fonts.bodySize, INK, 10, 2);
@@ -164,28 +204,28 @@ function drawBlock(
 
     case 'key_notes':
       for (const c of b.cards ?? []) {
-        para(ctx, cur, c.heading, ctx.bold, Fonts.bodySize, FOREST, 0, 1);
+        para(ctx, cur, c.heading, ctx.bold, Fonts.bodySize, pal.accent, 0, 1);
         para(ctx, cur, c.body, ctx.regular, Fonts.bodySize, INK, 10, 4);
       }
       break;
 
     case 'key_ideas':
-      label(ctx, cur, 'Key ideas');
+      label(ctx, cur, pal, 'Key ideas');
       for (const i of b.items ?? []) para(ctx, cur, `•  ${i}`, ctx.regular, Fonts.bodySize, INK, 10, 2);
       cur.advance(3);
       break;
 
     case 'worked_example':
-      label(ctx, cur, 'Worked examples');
+      label(ctx, cur, pal, 'Worked examples');
       for (const e of b.examples ?? []) {
         para(ctx, cur, `Q:  ${e.prompt}`, ctx.bold, Fonts.bodySize, INK, 0, 2);
         (e.steps ?? []).forEach((st, i) => para(ctx, cur, `${i + 1}.  ${st}`, ctx.regular, Fonts.bodySize, INK, 16, 1));
-        para(ctx, cur, `Answer:  ${e.answer}`, ctx.bold, Fonts.bodySize, FOREST, 16, 6);
+        para(ctx, cur, `Answer:  ${e.answer}`, ctx.bold, Fonts.bodySize, pal.accent, 16, 6);
       }
       break;
 
     case 'practice': {
-      label(ctx, cur, 'Practice questions');
+      label(ctx, cur, pal, 'Practice questions');
       if (b.intro) para(ctx, cur, b.intro, ctx.italic, Fonts.bodySize, MUTED, 0, 4);
       (b.questions ?? []).forEach((q, i) => {
         const text = `${i + 1}.  ${q.text}${q.marks != null ? `  [${q.marks}]` : ''}`;
@@ -200,7 +240,7 @@ function drawBlock(
     }
 
     case 'quiz':
-      label(ctx, cur, 'Quick quiz');
+      label(ctx, cur, pal, 'Quick quiz');
       for (const q of b.questions ?? []) {
         qNum++;
         const stem = `${qNum}.  ${q.q}`;
@@ -214,7 +254,7 @@ function drawBlock(
       break;
 
     case 'glossary':
-      label(ctx, cur, 'Glossary');
+      label(ctx, cur, pal, 'Glossary');
       for (const t of b.terms ?? []) {
         para(ctx, cur, `${t.term} - ${t.definition}`, ctx.regular, Fonts.bodySize, INK, 0, 3);
       }
@@ -223,7 +263,7 @@ function drawBlock(
 
     case 'checklist':
       for (const c of b.columns ?? []) {
-        para(ctx, cur, c.heading, ctx.bold, Fonts.bodySize, FOREST, 0, 1);
+        para(ctx, cur, c.heading, ctx.bold, Fonts.bodySize, pal.accent, 0, 1);
         if (c.blurb) para(ctx, cur, c.blurb, ctx.italic, Fonts.smallSize, MUTED, 10, 2);
         // An empty box to tick, drawn rather than typed: a "[ ]" in Helvetica is a
         // pair of brackets, and a printed checklist has to look tickable.
@@ -234,21 +274,21 @@ function drawBlock(
 
     case 'source_card':
       for (const src of b.sources ?? []) {
-        para(ctx, cur, src.label, ctx.bold, Fonts.bodySize, FOREST, 0, 1);
+        para(ctx, cur, src.label, ctx.bold, Fonts.bodySize, pal.accent, 0, 1);
         para(ctx, cur, src.text, ctx.regular, Fonts.bodySize, INK, 10, 2);
         if (src.quick_check) para(ctx, cur, `Quick check: ${src.quick_check}`, ctx.italic, Fonts.smallSize, MUTED, 10, 5);
       }
       break;
 
     case 'table':
-      drawTable(ctx, cur, b.headers ?? [], (b.rows ?? []).map(r => r.cells ?? []));
+      drawTable(ctx, cur, pal, b.headers ?? [], (b.rows ?? []).map(r => r.cells ?? []));
       if (b.note) para(ctx, cur, b.note, ctx.italic, Fonts.smallSize, MUTED, 0, 5);
       break;
 
     case 'chart':
-      drawChart(ctx, cur, b);
+      drawChart(ctx, cur, pal, b);
       if (b.aside_items?.length) {
-        para(ctx, cur, b.aside_heading ?? 'Useful phrases', ctx.bold, Fonts.smallSize, FOREST, 0, 2);
+        para(ctx, cur, b.aside_heading ?? 'Useful phrases', ctx.bold, Fonts.smallSize, pal.accent, 0, 2);
         for (const i of b.aside_items) para(ctx, cur, `•  ${i}`, ctx.regular, Fonts.smallSize, INK, 10, 1);
         cur.advance(4);
       }
@@ -257,7 +297,7 @@ function drawBlock(
     case 'two_column':
       for (const side of [b.left, b.right]) {
         if (!side) continue;
-        para(ctx, cur, side.heading, ctx.bold, Fonts.bodySize, FOREST, 0, 1);
+        para(ctx, cur, side.heading, ctx.bold, Fonts.bodySize, pal.accent, 0, 1);
         para(ctx, cur, side.body, ctx.regular, Fonts.bodySize, INK, 10, 5);
       }
       break;
@@ -273,7 +313,7 @@ function drawBlock(
       break;
 
     case 'reflection':
-      label(ctx, cur, 'Reflection task');
+      label(ctx, cur, pal, 'Reflection task');
       {
         const text = `${b.prompt}${b.marks != null ? `  [${b.marks}]` : ''}`;
         keepTogether(ctx, cur, text, 6);
@@ -285,7 +325,7 @@ function drawBlock(
       break;
 
     case 'contents':
-      label(ctx, cur, b.heading ?? 'Contents');
+      label(ctx, cur, pal, b.heading ?? 'Contents');
       (pack.pages ?? []).forEach((p, i) => {
         if (!(p.blocks ?? []).some(x => x.type !== 'contents')) return;
         para(ctx, cur, `${i + 1}.  ${p.title}${p.eyebrow ? `  (${p.eyebrow})` : ''}`,
@@ -295,7 +335,7 @@ function drawBlock(
       break;
 
     case 'closing':
-      label(ctx, cur, b.heading);
+      label(ctx, cur, pal, b.heading);
       for (const t of b.tips ?? []) para(ctx, cur, `•  ${t}`, ctx.regular, Fonts.bodySize, INK, 10, 2);
       cur.advance(3);
       break;
@@ -380,7 +420,7 @@ function tinted(ctx: DocCtx, cur: Cursor, bg: RGB, text: string): void {
  * Columns share the width equally. Guessing at content widths would be a layout engine,
  * and this renderer is explicitly not one.
  */
-function drawTable(ctx: DocCtx, cur: Cursor, headers: string[], rows: string[][]): void {
+function drawTable(ctx: DocCtx, cur: Cursor, pal: Palette, headers: string[], rows: string[][]): void {
   if (!headers.length) return;
   const size = Fonts.smallSize, pad = 5;
   const colW = CONTENT_W / headers.length;
@@ -390,7 +430,7 @@ function drawTable(ctx: DocCtx, cur: Cursor, headers: string[], rows: string[][]
     const wrapped = cells.map(c => wrapText(font, c ?? '', size, cellW));
     const h = Math.max(...wrapped.map(w => w.length), 1) * size * Fonts.lineHeight + pad * 2;
     // A grid whose head is on the previous page is unreadable, so it is redrawn.
-    if (cur.ensure(h) && font !== ctx.bold) drawRow(headers, ctx.bold, FOREST, rgb(1, 1, 1));
+    if (cur.ensure(h) && font !== ctx.bold) drawRow(headers, ctx.bold, pal.accent, rgb(1, 1, 1));
     if (bg) cur.page.drawRectangle({ x: Margins.left, y: cur.y - h, width: CONTENT_W, height: h, color: bg });
     wrapped.forEach((linesOfCell, i) => {
       let y = cur.y - pad;
@@ -406,14 +446,14 @@ function drawTable(ctx: DocCtx, cur: Cursor, headers: string[], rows: string[][]
     cur.advance(h);
   };
 
-  drawRow(headers, ctx.bold, FOREST, rgb(1, 1, 1));
+  drawRow(headers, ctx.bold, pal.accent, rgb(1, 1, 1));
   rows.forEach((r, i) => drawRow(r, ctx.regular, i % 2 ? CARD_BG : null, INK));
   cur.advance(6);
 }
 
 /** A bar chart. A line chart is drawn as bars too - the figures are the point, and a
  *  polyline in a fallback PDF is not worth a second code path. */
-function drawChart(ctx: DocCtx, cur: Cursor, b: Extract<Block, { type: 'chart' }>): void {
+function drawChart(ctx: DocCtx, cur: Cursor, pal: Palette, b: Extract<Block, { type: 'chart' }>): void {
   const series = b.series ?? [];
   if (!series.length) return;
   const H = 130, pad = 18;
@@ -432,9 +472,9 @@ function drawChart(ctx: DocCtx, cur: Cursor, b: Extract<Block, { type: 'chart' }
   series.forEach((sr, i) => {
     const h = Math.max(1, (sr.value / max) * (H - pad));
     const x = Margins.left + step * (i + 0.5) - barW / 2;
-    cur.page.drawRectangle({ x, y: base, width: barW, height: h, color: FOREST });
+    cur.page.drawRectangle({ x, y: base, width: barW, height: h, color: pal.accent });
     const v = String(sr.value), vw = ctx.bold.widthOfTextAtSize(v, Fonts.smallSize);
-    drawText(cur.page, v, x + barW / 2 - vw / 2, base + h + 3, { font: ctx.bold, size: Fonts.smallSize, color: FOREST });
+    drawText(cur.page, v, x + barW / 2 - vw / 2, base + h + 3, { font: ctx.bold, size: Fonts.smallSize, color: pal.accent });
     const lab = truncateToWidth(ctx.regular, String(sr.label), Fonts.smallSize, step - 4);
     const lw = ctx.regular.widthOfTextAtSize(lab, Fonts.smallSize);
     drawText(cur.page, lab, Margins.left + step * (i + 0.5) - lw / 2, base - 11,
