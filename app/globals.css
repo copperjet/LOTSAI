@@ -599,10 +599,20 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
 .aform input,.aform select,.atable input,.atable select{font:inherit;font-size:13.5px;padding:6px 9px;
   border:1px solid var(--line);border-radius:9px;background:var(--paper);color:var(--ink);}
 .aform input:focus,.aform select:focus,.atable input:focus,.atable select:focus{outline:2px solid var(--forest-light);outline-offset:1px;}
-.aform button,.atable button.abtn{font:inherit;font-size:13.5px;font-weight:600;padding:7px 14px;border-radius:10px;
+/* .abtn on its own, not only inside .aform and .atable. /admin/knowledge puts its
+   three primary buttons - Read it, Add it to the list, Save - in a .kcard, which
+   matched neither, so the one page where a button commits something to what the
+   school says was the one page whose buttons rendered as browser default grey. */
+.aform button,.atable button.abtn,button.abtn{font:inherit;font-size:13.5px;font-weight:600;
+  padding:7px 14px;border-radius:10px;
   background:var(--forest);color:#FFFDF8;border:0;cursor:pointer;}
-.aform button:hover,.atable button.abtn:hover{background:var(--forest-light);}
-.aform button:disabled,.aform select:disabled{opacity:.45;cursor:not-allowed;}
+.aform button:hover,.atable button.abtn:hover,button.abtn:hover{background:var(--forest-light);}
+.aform button:disabled,.aform select:disabled,button.abtn:disabled{opacity:.45;cursor:not-allowed;}
+button.abtn:disabled:hover{background:var(--forest);}
+/* A disabled .quiet still looked live - Withdraw and Put it back are both disabled
+   while a save is in flight, and both are one click from changing what LOTS AI says. */
+.quiet:disabled{opacity:.45;cursor:not-allowed;}
+.quiet:disabled:hover{color:var(--muted);text-decoration-color:var(--line);}
 .aproblem{background:var(--bad-tint);color:var(--bad);border-radius:12px;padding:10px 14px;
   font-size:13px;font-weight:600;margin-bottom:14px;max-width:70ch;}
 .afiles{display:flex;flex-direction:column;gap:5px;margin:8px 0;}
@@ -655,4 +665,75 @@ details.d.boxed .dbody{padding:0 0 0 0;gap:0;}
   /* Wide tables scroll inside themselves rather than pushing the page sideways. */
   .atable{display:block;overflow-x:auto;white-space:nowrap;}
   .atable .wrap{white-space:pre-wrap;}
+}
+
+/* ---- mail ----
+   A two-column reading screen: what arrived on the left, the one open message and
+   its reply on the right. It borrows .btn and .tag from above rather than restating
+   them, so a change to a button is still one change. The variants below are scoped
+   under .mtags because .tag is gold everywhere else and mail is the only place that
+   needs it to say "now" in red. */
+.mail{max-width:1180px;margin:0 auto;padding:26px 22px 40px;}
+.mhead{display:flex;align-items:flex-start;gap:16px;margin-bottom:18px;}
+.mhead h1{font-size:26px;}
+.macts{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.mread .macts,.mreply .macts{margin-left:0;margin-top:12px;}
+.mnote{color:var(--muted);font-size:13px;margin:4px 0;}
+.mbad{background:var(--bad-tint);color:var(--bad);border:1px solid rgba(185,28,28,.25);
+  padding:10px 14px;border-radius:12px;font-size:13.5px;margin:0 0 14px;cursor:pointer;}
+.mok{background:var(--ok-tint);color:var(--ok);border:1px solid rgba(21,128,61,.25);
+  padding:10px 14px;border-radius:12px;font-size:13.5px;margin:0 0 14px;cursor:pointer;}
+.msug{background:var(--forest-tint);border-radius:12px;padding:9px 13px;font-size:13.5px;margin:10px 0;}
+
+.mgrid{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:20px;align-items:start;}
+
+.msearch{display:flex;gap:8px;margin-bottom:12px;}
+.msearch input{flex:1;min-width:0;border:1px solid var(--line);background:var(--card);color:var(--ink);
+  border-radius:12px;padding:8px 12px;font-size:13.5px;font-family:inherit;}
+
+.mlist{display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 200px);overflow-y:auto;padding-right:4px;}
+.mrow{display:flex;flex-direction:column;gap:3px;text-align:left;width:100%;padding:11px 13px;
+  border:1px solid var(--line-soft);background:var(--card);border-radius:14px;transition:.12s;}
+.mrow:hover{border-color:var(--forest-light);}
+.mrow.on{border-color:var(--forest);box-shadow:var(--shadow-sm);}
+.mrow.unread .msub{font-weight:700;}
+.mrow.bad{border-color:rgba(185,28,28,.35);background:var(--bad-tint);}
+.mtop{display:flex;align-items:baseline;gap:8px;font-size:13.5px;}
+.mtop b{font-weight:650;}
+.mwhen{margin-left:auto;color:var(--muted);font-size:11.5px;white-space:nowrap;}
+.msub{font-size:13.5px;line-height:1.35;}
+.mtags{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;}
+.mtags .tag.bad{background:var(--bad-tint);color:var(--bad);border-color:rgba(185,28,28,.3);}
+.mtags .tag.warn{background:var(--warn-tint);color:var(--warn);border-color:rgba(138,100,16,.3);}
+.mtags .tag.ok{background:var(--ok-tint);color:var(--ok);border-color:rgba(21,128,61,.3);}
+.msum{font-size:12.5px;color:var(--muted);line-height:1.4;margin-top:2px;}
+.msum.dim{opacity:.75;}
+
+.mread{border:1px solid var(--line-soft);background:var(--card);border-radius:16px;padding:20px 22px;
+  box-shadow:var(--shadow-sm);min-height:200px;}
+.mread h2{font-size:19px;margin-bottom:2px;}
+.mread h3{font-size:15px;margin-bottom:8px;}
+/* The message as it was written: a parent's line breaks are part of what they said. */
+.mbody{white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:14px;line-height:1.6;
+  background:var(--sunk);border-radius:12px;padding:14px 16px;margin:14px 0 0;max-height:46vh;overflow-y:auto;}
+
+.mreply{margin-top:22px;border-top:1px solid var(--line-soft);padding-top:18px;}
+.msteer{display:block;margin-bottom:10px;}
+.msteer span{display:block;font-size:12.5px;color:var(--muted);margin-bottom:5px;}
+.msteer input,.msubject{width:100%;box-sizing:border-box;border:1px solid var(--line);background:var(--card);
+  color:var(--ink);border-radius:12px;padding:8px 12px;font-size:13.5px;font-family:inherit;}
+.msubject{margin:12px 0 8px;font-weight:600;}
+.mdraft{width:100%;box-sizing:border-box;border:1px solid var(--line);background:var(--card);color:var(--ink);
+  border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;font-family:inherit;resize:vertical;}
+
+.mconnect{max-width:640px;border:1px solid var(--line-soft);background:var(--card);border-radius:16px;
+  padding:24px 26px;box-shadow:var(--shadow-sm);}
+.mconnect h2{font-size:19px;margin-bottom:8px;}
+.mconnect p{font-size:14px;margin:0 0 12px;}
+.mconnect ul{font-size:13.5px;line-height:1.7;padding-left:20px;margin:0 0 14px;}
+.mconnect .btn{display:inline-block;text-decoration:none;margin-top:6px;}
+
+@media (max-width:900px){
+  .mgrid{grid-template-columns:1fr;}
+  .mlist{max-height:none;}
 }

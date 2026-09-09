@@ -1,3 +1,4 @@
+import { mockTriage, mockReply } from './mail/mocks';
 /**
  * Fixtures for MOCK_LLM=1 (see lib/llm.ts).
  *
@@ -528,5 +529,9 @@ export function mockFor(workflow: string, cached: string, prompt: string): unkno
   // whatever the fixture is verbatim.
   if (workflow === 'ocr_extract') return mockOcr();
   if (workflow === 'school_question') return mockAsk(prompt);
+  // Mail fixtures live beside the mailbox they fake, in lib/mail/mocks.ts, because
+  // the inbox they have to agree with is there.
+  if (workflow === 'mail_triage') return mockTriage(prompt);
+  if (workflow === 'mail_reply') return mockReply(prompt);
   return {};
 }

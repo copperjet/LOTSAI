@@ -21,3 +21,6 @@ tsconfig.tsbuildinfo
 .print_check.mjs
 __pycache__/
 .next-build
+
+# Local staff address list — real addresses, never committed.
+emails.txt

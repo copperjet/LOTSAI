@@ -73,6 +73,10 @@ Set these for **Production** (and Preview, if previews should work):
 | `MOCK_LLM` | `1` to stay on fixtures; unset to make real calls. `MOCK_CLAUDE` is the old name, still honoured. |
 | `ANTHROPIC_API_KEY` | only when switching back to `LLM_PROVIDER=anthropic` |
 | `OPENAI_MODEL_SMALL` / `_STANDARD` / `_LARGE` | optional per-tier overrides |
+| `MOCK_MAIL` | `1` to run mail against fixtures. Unset it only once the three below are set. |
+| `GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` | the Web application OAuth client, from Google Cloud console |
+| `MAIL_TOKEN_KEY` | 32 random bytes, base64. Encrypts every stored refresh token. |
+| `GOOGLE_OAUTH_REDIRECT` | only if the callback host differs from the host serving the app |
 
 ```bash
 vercel env add NEXT_PUBLIC_SUPABASE_URL production
@@ -82,6 +86,34 @@ vercel env add DEMO_USER_EMAIL production
 vercel env add LLM_PROVIDER production
 vercel env add OPENAI_API_KEY production
 ```
+
+## 3b. Mail, when it is switched on
+
+Mail is off until an OAuth client exists; until then `/mail` shows a fixture inbox and
+says so. To make it real:
+
+1. Google Cloud console → **APIs & Services → Library → Gmail API → Enable**.
+2. **OAuth consent screen.** Choose **Internal** if every teacher is on
+   `@lusakaoaktree.school` — that skips Google's verification review entirely.
+   Choose **External** only if staff on personal addresses need it: `gmail.modify` and
+   `gmail.send` are *restricted* scopes, so an External app in production needs Google's
+   verification (a CASA security assessment) before anyone outside the test-user list can
+   connect. Adding the handful of staff as **test users** works from day one and is
+   capped at 100.
+3. **Credentials → Create credentials → OAuth client ID → Web application.**
+   Authorised redirect URIs:
+   `https://<your-host>/api/mail/callback` and `http://localhost:3000/api/mail/callback`.
+4. Generate the encryption key:
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+   ```
+   Set it as `MAIL_TOKEN_KEY`. Losing it costs every teacher one reconnect, nothing more.
+5. Apply `supabase/migrations/0020_mail.sql`.
+6. Unset `MOCK_MAIL`.
+
+`/api/mail/connect` refuses to send anyone to Google when `MAIL_TOKEN_KEY` is missing —
+better than a teacher reading a consent screen listing their whole mailbox and only then
+finding there is nowhere safe to put the result.
 
 ## 4. Deploy
 

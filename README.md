@@ -274,6 +274,45 @@ enforced on the way in. This is the foundation the v2 "turn this into a study pa
 
 ---
 
+### Mail
+
+Each teacher connects their **own** Google mailbox, from `/mail`. This is the one place
+in the codebase that does not use the shared service account, and the reason is in
+`supabase/migrations/0020_mail.sql`: a service account can only reach a mailbox through
+domain-wide delegation, which is one administrator granting one application the right to
+read every inbox in the school. That is the wrong shape for a teacher's correspondence
+with a parent, and it would not reach the staff whose address is not on the school
+domain at all.
+
+What it does, in the order a teacher meets it:
+
+| | |
+|---|---|
+| **Sorts** | One model call per page of inbox classifies who each message is from, how urgent it is, what it is about in one line, and whether a reply is owed. Verdicts are cached in `mail_message`, so re-opening the inbox is a database read. |
+| **Drafts** | `Write a reply` returns text on the screen. Nothing is saved until the teacher presses **Save to Gmail drafts**, and it lands in their own Gmail, unsent. |
+| **Sends** | A second button, with a confirmation naming the recipient. The route refuses without `approve: true`, and sends the body exactly as posted — it never regenerates or appends. |
+| **Files** | Label, archive, mark read or unread. Archive removes `INBOX`; it is not a delete, and the scopes granted cannot delete. |
+
+**A message is untrusted input.** Every other model call here reads the school's own
+material; this one reads text written by whoever chose to type an address. The defence
+is three things, and none of them is the system prompt alone — structured output with no
+tool and no free-text field that becomes an action; the message fenced and labelled as
+quoted data, with the instruction placed *before* it; and a person pressing send. On top
+of that, **recipients on a reply are read off the original message server-side and are
+never taken from the request** (`app/api/mail/route.ts`), which is the specific defence
+against text that talks a reply into going somewhere else. A message that tries it is
+flagged `suspicious`, drawn in red, and has its reply buttons removed — surfaced rather
+than merely resisted, because the first one of these is usually the start of a run
+against the whole staff list. The fixture inbox in `lib/mail/mocks.ts` contains one, so
+this is visible on screen rather than only asserted here.
+
+Refresh tokens are encrypted at rest (AES-256-GCM, `MAIL_TOKEN_KEY`), so a database dump
+and the service-role key are two separate losses rather than one. Disconnecting revokes
+the grant at Google, deletes the row, and deletes the triage cache.
+
+With no OAuth client configured, `MOCK_MAIL` is on by default and the whole path runs
+against a fixture inbox — no Google account, no cost.
+
 ## What is not wired yet
 
 | | |
@@ -282,6 +321,7 @@ enforced on the way in. This is the foundation the v2 "turn this into a study pa
 | **Drive + docx render** | Approval renders a **PDF** to the `artefacts` bucket. The docx into the existing Drive folder still needs the Google Drive API credential; the render layer that produces it is in place. |
 | **Offline sync** | Evaluations queue to `localStorage` when the browser is offline. The flush-on-reconnect job is not written. |
 | **Overnight pre-staging** | The batch job that drafts next week at half price. |
+| **Mail, for staff off the school domain** | `gmail.modify` and `gmail.send` are restricted scopes. An **Internal** OAuth app needs no Google review but only reaches `@lusakaoaktree.school` addresses; at least one address on the school's staff list is a personal Gmail. Reaching those means an **External** app and Google's verification (a CASA assessment), or adding them as test users (capped at 100). |
 
 ---
 
