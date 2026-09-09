@@ -604,7 +604,7 @@ export default function App() {
       case 'packPicker':
         return <StudyPackPicker classes={d.classes as ClassCal[]} today={d.today as string}
                                 onPick={(classId, weekFrom, weekTo, semester) => doPackMatch({ classId, weekFrom, weekTo, semester })}
-                                onUpload={doPackFromUpload} />;
+                                onUpload={() => doPackFromUpload()} />;
 
       case 'worksheetPicker':
         return <WorksheetPicker classes={d.classes as ClassCal[]}
@@ -1424,7 +1424,10 @@ export default function App() {
   async function doPackFromUpload(initial?: File[]) {
     const cal = await loadCalendar();
     if (!cal.classes.length) return say('said', { text: 'You have no classes to check a file against.' });
-    say('uploadCard', { classes: cal.classes, initial });
+    // Only ever an array of files. A caller that wires this straight to onClick sends
+    // the click event, and the card renders off this value.
+    const files = Array.isArray(initial) ? initial.filter(f => f instanceof File) : [];
+    say('uploadCard', { classes: cal.classes, initial: files });
   }
 
   /**
@@ -1778,6 +1781,9 @@ export default function App() {
             <span className={`sw ${online ? 'on' : ''}`}><i /></span>
             <span>{online ? 'Online' : 'Offline - capture still works'}</span>
           </div>
+          {/* Everybody has a mailbox, so unlike Administration this is shown to
+              everybody. The connection behind it is still per person. */}
+          {user && <a className="adminlink" href="/mail">Mail</a>}
           {/* The one way in. /admin answers notFound() to everybody else, so this is
               shown to the roles that can actually open it and to nobody else. */}
           {user && ADMIN_ROLES.includes(user.role) && (
@@ -2499,7 +2505,12 @@ function UploadCard({ classes, onBuild, initial }: {
 }) {
   const [chosen, setChosen] = useState(classes[0]?.id ?? '');
   const k = classes.find(c => c.id === chosen) ?? classes[0];
-  const [files, setFiles] = useState<File[]>(initial ?? []);
+  // Guarded rather than trusted: this card is reached from a chip whose onClick would
+  // otherwise hand the click event in as `initial`, and one non-array here takes the
+  // whole thread down on the first render (files.some is not a function).
+  const [files, setFiles] = useState<File[]>(
+    Array.isArray(initial) ? initial.filter(f => f instanceof File) : [],
+  );
   const [over, setOver] = useState(false);
   const [state, setState] = useState<'idle' | 'reading' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<UploadResult | null>(null);
@@ -2518,8 +2529,27 @@ function UploadCard({ classes, onBuild, initial }: {
   }, [files]);
 
   function take(list: FileList | null) {
-    setFiles(list ? [...list].slice(0, 5) : []);
-    setState('idle'); setResult(null); setErr('');
+    const picked = list ? [...list].slice(0, 5) : [];
+    setState('idle'); setResult(null);
+    // Said here rather than after the upload. Past the host's request-body limit the
+    // POST never reaches /api/ingest/upload, so the only thing the teacher could be
+    // told was "the upload failed" - after waiting for a photograph to go up a school
+    // connection. MAX_UPLOAD_BYTES in lib/ingest/extract.ts is the same number; it is
+    // copied because that module pulls pdfjs and the vision model in behind it.
+    const total = picked.reduce((n, f) => n + f.size, 0);
+    if (total > 4 * 1024 * 1024) {
+      setFiles([]);
+      // 'error' rather than 'idle': the message below this card is only rendered in
+      // that state, so an idle card with an err set says nothing at all.
+      setState('error');
+      setErr(picked.length === 1
+        ? `That is ${(total / 1024 / 1024).toFixed(1)} MB. One upload must be under 4 MB - `
+          + 'photograph it again at a lower resolution, or send the pages separately.'
+        : `Those ${picked.length} files come to ${(total / 1024 / 1024).toFixed(1)} MB together. `
+          + 'One upload must be under 4 MB - send them in two goes.');
+      return;
+    }
+    setFiles(picked); setErr('');
   }
 
   async function reconcile() {

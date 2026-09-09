@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
 import { reconcile } from '@/lib/ingest/reconcile';
-import { kindOf, extractFile, MAX_IMAGE_BYTES, type Kind } from '@/lib/ingest/extract';
+import { kindOf, extractFile, MAX_IMAGE_BYTES, tooMuch, type Kind } from '@/lib/ingest/extract';
 import { cleanText, sourceNote, MAX_STORED_TEXT } from '@/lib/ingest/source';
 
 export const runtime = 'nodejs';
@@ -41,6 +41,12 @@ export async function POST(req: NextRequest) {
   if (!subjectId || !yearGroup) {
     return NextResponse.json({ error: 'subjectId and yearGroup are required - an objective only resolves against a subject and year.' }, { status: 400 });
   }
+
+  // The whole request first. Past the platform's own body limit this code never runs
+  // at all, so the check is here to catch what fits through and to give the size that
+  // was actually sent a message of ours.
+  const heavy = tooMuch(files);
+  if (heavy) return NextResponse.json({ error: heavy }, { status: 413 });
 
   // Every file is classified before any of them is read, so an unsupported one
   // fails the request before a single model call has been paid for.
