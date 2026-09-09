@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
 import { RegistryWeek } from '@/lib/planner';
+import { publishedActivities } from '@/lib/schemeOfWork';
 import * as engine from '@/lib/engine';
 
 export const runtime = 'nodejs';
@@ -123,11 +124,18 @@ const body = await req.json();
       differentiation: r.differentiation, is_recap: r.is_recap,
     }));
   } else {
+    // What the published scheme of work suggests for this week's objectives. Empty
+    // until a department's framework is recorded and its scheme of work read in, so
+    // every subject that has neither plans exactly as it did before.
+    const registryWeek = reg as RegistryWeek;
+    const published = await publishedActivities(
+      klass.subject_id, klass.year_group, registryWeek.objectives, registryWeek.topic_label);
+
     const out = await engine.generate(std, {
-      reg: reg as RegistryWeek,
+      reg: registryWeek,
       periodsPerWeek: klass.periods_per_week,
       weekCommencing: week.week_commencing,
-      inventory, flagged, basis,
+      inventory, flagged, basis, published,
     }, user.id);
     lessons = out.lessons as LessonRow[];
   }

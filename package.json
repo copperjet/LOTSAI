@@ -10,7 +10,10 @@
     "ingest": "python scripts/ingest_overviews.py \"../CURRICULUM OVERVIEWS\" --year 2026-27",
     "seed": "node --env-file=.env.local scripts/seed.mjs",
     "calendar": "node --env-file=.env.local scripts/load_calendar.mjs",
-    "repair:objectives": "node --env-file=.env.local scripts/repair_objectives.mjs"
+    "repair:objectives": "node --env-file=.env.local scripts/repair_objectives.mjs",
+    "ingest:sow": "python scripts/ingest_scheme_of_work.py \"../Schemes of Work\" --out supabase/seed",
+    "load:curriculum": "node --env-file=.env.local scripts/load_curriculum.mjs",
+    "load:sow": "node --env-file=.env.local scripts/load_scheme_of_work.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

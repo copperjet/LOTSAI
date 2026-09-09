@@ -1,3 +1,4 @@
+import { type Published } from './schemeOfWork';
 import { call } from './claude';
 import { admin } from './supabase';
 import { workKey, overlap, MatchTier, TIER_MEANING } from './workkey';
@@ -150,6 +151,10 @@ export interface GenerateInput {
   exemplar?: { methodology: string; differentiation: string }[];
   /** Adapt mode: the approved plan we are starting from. */
   basis?: { day_of_week: number; methodology: string; resources: string; differentiation: string }[];
+  /** What the published scheme of work suggests for these objectives (lib/schemeOfWork.ts).
+   *  Empty for a subject with no framework recorded, which is every subject until its
+   *  department's scheme of work has been read in. */
+  published?: Published[];
 }
 
 export async function generatePlan(input: GenerateInput, userId: string) {
@@ -165,6 +170,26 @@ export async function generatePlan(input: GenerateInput, userId: string) {
     reg.objectives.map((o, i) => `  [${i}] ${o.ref ? o.ref + ' - ' : ''}${o.text}`).join('\n') +
     (reg.activities.length ? `\nSuggested activities from the overview:\n` + reg.activities.map(a => `  - ${a}`).join('\n') : '') +
     (reg.resources.length ? `\nResources named in the overview:\n` + reg.resources.map(r => `  - ${r}`).join('\n') : ''),
+
+    // Its own block, deliberately. The two above are the school's own overview; this is
+    // the examination board's scheme of work, and a head of department reading a plan
+    // has to be able to tell which is which. The heading says whose suggestion it is,
+    // and says out loud that the inventory still decides what a lesson may call for -
+    // Cambridge's activities name micro:bits, Scratch and a device per pair, and this
+    // school may own none of them.
+    ...(input.published?.length ? [
+      'SUGGESTED TEACHING ACTIVITIES FROM THE PUBLISHED SCHEME OF WORK. Not the school\'s own\n'
+      + 'material, and not a resource list: it is what the examination board suggests for these\n'
+      + 'objectives, for you to adapt. Where an activity needs something the resource inventory\n'
+      + 'does not have, teach the same thing with what the inventory does have.\n\n'
+      + input.published.map(p =>
+        `  ${p.key}${p.objective_text ? ` - ${p.objective_text}` : ''}  [${p.source}]\n`
+        + p.activities.map(a => `    - ${a}`).join('\n')
+        + (p.resources.length ? `\n    Resources it assumes: ${p.resources.join('; ')}` : '')
+        + (p.notes.length ? `\n    Prior knowledge: ${p.notes.join(' ')}` : '')
+      ).join('\n\n'),
+    ] : []),
+
     `RESOURCE INVENTORY - only these are available:\n` + input.inventory.map(r => `  - ${r}`).join('\n'),
   ];
 

@@ -56,19 +56,40 @@ except ImportError:
 # false positives — verified against the full ingest before changing it.
 REF = re.compile(r'\b(\d{1,2}[A-Z]{1,2}[a-z]{0,2}\.\d{2})\b')
 
+# A unit cell in an overview that has a unit column: "UNIT 7.1 ALGORITHMS,
+# FLOWCHARTS AND SUB-ROUTINES". Anchored, so a mention of a unit inside an
+# objective does not turn that column into the unit column.
+UNIT_CELL = re.compile(r"\s*UNIT\b", re.I)
+
 WORD_NUM = {'one':1,'two':2,'three':3,'four':4,'five':5,'six':6,'seven':7,'eight':8,
             'nine':9,'ten':10,'eleven':11,'twelve':12,'thirteen':13,'fourteen':14,'fifteen':15}
 
 YEAR_GROUPS = ['CP1','CP2','CP3','CP4','CP5','CP6','LS1','LS2','LS3',
                'IGCSE 1','IGCSE 2','AS Level','A Level','AS','EY1','EY2','EY3','Acorns']
 
+# What curriculum_week and klass actually hold. The overviews say "AS Level" and the
+# registry has said "AS" since the first import, so a week filed under the long form
+# can never be found for an AS class - it is not a wrong row, it is an invisible one.
+# Normalised on the way out, in one place, so both readers and the folder fallback
+# cannot disagree about it.
+YEAR_CANON = {'AS Level': 'AS'}
+
+# Order matters: this is a first-match scan over substrings, so 'ICT' has to be
+# tested before anything that could also match an ICT filename.
 SUBJECT_HINTS = {
     'MATH':'Mathematics', 'MATHEMATIC':'Mathematics', 'ENGLISH':'English',
     'SCIENCE':'Science', 'COMPUTING':'Computing', 'ICT':'ICT',
+    'INFORMATION TECHNOLOGY':'Information Technology',
     'GLOBAL PERSPECTIVE':'Global Perspectives', 'G.P':'Global Perspectives', 'GP ':'Global Perspectives',
     'FRENCH':'French', 'ART':'Art and Design', 'MDD':'Music, Dance and Drama',
     'P.E':'Physical Education', 'PHYSICAL EDUCATION':'Physical Education', 'PE ':'Physical Education',
 }
+
+# AS and A Level Information Technology is named "IT" in every filename the department
+# uses - "IT A Level Curriculum Overview S1". A substring hint cannot be used for a name
+# this short: UNIT, EDIT and CIRCUIT all contain it. So it is a whole word, tested only
+# after the table above has had its say, which is what keeps ICT files out of it.
+IT_WORD = re.compile(r"\bIT\b")
 
 # The calendar is the single source of truth (Addendum A Section A9) — overview dates
 # are matched to it, never the reverse. It is read from supabase/seed/calendar.json,
@@ -107,8 +128,9 @@ FOLDER_YEAR = {'ACORNS': 'Acorns', 'NURSERY': 'EY1', 'MIDDLE': 'EY2', 'RECEPTION
 def find_year(text: str):
     # lookahead, not a word boundary: "cp1OVER VIEW MDD" has no boundary after CP1
     flat = text.upper().replace('_', ' ').replace('CP ', 'CP')
-    return next((y for y in YEAR_GROUPS
-                 if re.search(rf'(?<![A-Z0-9]){re.escape(y)}(?![0-9])', flat)), None)
+    hit = next((y for y in YEAR_GROUPS
+                if re.search(rf'(?<![A-Z0-9]){re.escape(y)}(?![0-9])', flat)), None)
+    return YEAR_CANON.get(hit, hit)
 
 
 def classify(path: Path):
@@ -122,7 +144,10 @@ def classify(path: Path):
     if not year:
         folder = path.parent.name.upper()
         year = next((v for k, v in FOLDER_YEAR.items() if k in folder), None) or find_year(folder)
+        year = YEAR_CANON.get(year, year)
     subject = next((v for k, v in SUBJECT_HINTS.items() if k in name), None)
+    if not subject and IT_WORD.search(name):
+        subject = 'Information Technology'
     if not subject and year in ('Acorns', 'EY1', 'EY2', 'EY3'):
         subject = 'Early Years (integrated)'   # EY overviews are not split by subject
     if 'SEMESTER 2' in name or ' S2 ' in name or name.startswith('S2'):
@@ -150,6 +175,14 @@ def week_number(cell: str):
     m = re.match(r'(\d{1,2})\b', t)
     if m and 1 <= int(m.group(1)) <= 15:
         return int(m.group(1))
+    # And the same thing written out. The CP2 Computing overview heads its column
+    # "School Week" and fills the cell "One", "Two", "Three" - the word on its own,
+    # because the header already said what it is. Anchored to the start of the cell
+    # for the same reason the bare digit is: "one" is an ordinary word, and only the
+    # first token in a week column can be a week label.
+    m = re.match(r'([a-z]+)', t)
+    if m and m.group(1) in WORD_NUM:
+        return WORD_NUM[m.group(1)]
     return None
 
 
@@ -164,13 +197,25 @@ def unwrap(lines):
     its four weeks came in as 125 fragments, which is what the study pack then put
     on its cover, mid-sentence.
 
-    A line continues the one above when that line did not finish a sentence and this
-    one opens in lower case. An objective of its own starts with a capital, so a
-    .docx's already-whole lines pass through untouched.
+    A line continues the one above when that line did not finish a sentence and
+    this one opens in lower case. An objective of its own starts with a capital, so
+    a .docx's already-whole lines pass through untouched.
+
+    That rule alone leaves the wraps that break before a capital. The LS1 Computing
+    overview states 7CT.04 as "Understand and use selection statements, limited to
+    IF, / THEN, ELSE, presented as flowcharts." - the break falls after a comma and
+    the next line opens on THEN, so the objective imported in two pieces and the
+    second piece carried no reference. A line ending in a comma has not finished,
+    whatever the next one starts with; the only thing that genuinely begins a new
+    objective there is a syllabus reference, and that is what is checked for.
     """
     out = []
     for line in lines:
-        if out and not re.search(r'[.;:!?]$', out[-1]) and re.match(r'[a-z(]', line):
+        joins = bool(out) and not re.search(r"[.;:!?]$", out[-1]) and (
+            re.match(r"[a-z(]", line)
+            or (out[-1].rstrip().endswith(",") and not REF.match(line.strip()))
+        )
+        if joins:
             out[-1] = f'{out[-1]} {line}'
         else:
             out.append(line)
@@ -264,10 +309,19 @@ def header_map(grid):
     if best:
         col['obj'] = best[2]
 
+    # The runner-up is the unit or topic column, where there is one. Several
+    # overviews run "UNIT | LEARNING OBJECTIVES" and the unit is what the school
+    # calls that stretch of the term - it belongs in topic_label, and reading it
+    # is the difference between "UNIT 7.1 Algorithms" and a truncated objective.
+    rest = [(rank(h), -i, i) for i, h in enumerate(heads)
+            if rank(h) and i != col.get('obj')]
+    if rest and 'obj' in col:
+        col['unit'] = max(rest)[2]
+
     return (col, offset) if 'week' in col and 'obj' in col else (None, offset)
 
 
-def emit_row(wk, obj_text, act_text='', res_cells=None):
+def emit_row(wk, obj_text, act_text='', res_cells=None, unit=None):
     """
     Build one curriculum_week row from the raw cell strings, whatever read them.
     Both readers funnel through here so a PDF week and a .docx week are shaped and
@@ -278,7 +332,16 @@ def emit_row(wk, obj_text, act_text='', res_cells=None):
     objs = split_objectives(obj_text)
     if not objs:
         return None
-    topic = objs[0]['text'][:90] if objs[0]['ref'] is None else obj_text.split('\n')[0][:90]
+    # The unit the overview names, where it has a unit column. Every CP and LS
+    # Computing overview does, and the cell spans the weeks that unit runs for - so
+    # only the first of those weeks carries the text and the rest arrive blank. Read
+    # per row, that made topic_label the first objective instead: LS1 week 3 came in
+    # as "7CT.04 Understand and use selection statements, limited to IF," where the
+    # school had written UNIT 7.1 ALGORITHMS, FLOWCHARTS AND SUB-ROUTINES. Both
+    # readers carry the last unit forward and hand it in here.
+    topic = ' '.join((unit or '').split())
+    if not topic:
+        topic = objs[0]['text'][:90] if objs[0]['ref'] is None else obj_text.split('\n')[0][:90]
     res = list(res_cells) if res_cells else []
     if not res:
         tail = re.split(r'\bResources\b', obj_text, flags=re.I)
@@ -289,7 +352,7 @@ def emit_row(wk, obj_text, act_text='', res_cells=None):
         # date_rows() below.
         'week_commencing': None,
         'is_teaching_week': None,
-        'topic_label': topic.strip(),
+        'topic_label': ' '.join(topic.split())[:90],
         'objectives': objs,
         'activities': [a.strip(' 0123456789.•') for a in act_text.split('\n') if a.strip()],
         'resources': [x.strip(' -•') for x in res if x.strip(' -•')],
@@ -300,6 +363,7 @@ def read_docx_overview(path: Path):
     """Clean-celled grids: map columns by header text (header_map)."""
     rows = []
     for grid in docx_tables(path):
+        unit = ''
         col, offset = header_map(grid)
         if not col:
             continue
@@ -307,6 +371,10 @@ def read_docx_overview(path: Path):
             cells = [(c or '').replace('\xa0', ' ').strip() for c in r]
             if len(cells) <= max(col.values()):
                 continue
+            # A unit cell spans the weeks its unit runs for, so only the first row of
+            # that stretch carries the text. Blank means unchanged, not none.
+            if 'unit' in col and cells[col['unit']].strip():
+                unit = cells[col['unit']].strip()
             wk = week_number(cells[col['week']])
             if not wk:
                 continue
@@ -314,6 +382,7 @@ def read_docx_overview(path: Path):
                 wk, cells[col['obj']],
                 cells[col['act']] if 'act' in col else '',
                 cells[col['res']].split('\n') if 'res' in col else None,
+                unit=unit,
             )
             if row:
                 rows.append(row)
@@ -350,29 +419,67 @@ def read_pdf_overview(path: Path):
                 txt_len[i] += len(c)
         if not any(wk_hits):
             continue
-        wk_col = max(range(ncol), key=lambda i: wk_hits[i])
         obj_col = max(range(ncol), key=lambda i: (ref_hits[i], txt_len[i]))
-        if obj_col == wk_col:
+
+        # Columns, plural. The header drifts, and so do the values under it: the CP2
+        # Computing overview puts "One" in one column, "Two / 31st to 4th" in the one
+        # to its left and "Three" back in the first. A single best column therefore
+        # read every other week and silently dropped the rest - seven weeks out of a
+        # fourteen week semester, which looks like a short overview rather than a
+        # parse that lost half of it.
+        #
+        # So a week is looked for in any column that ever held one, and the objectives
+        # are the union of every column carrying syllabus references. The unit and the
+        # month columns hold neither, which is what keeps them out.
+        wk_cols = [i for i in range(ncol) if wk_hits[i] and i != obj_col]
+        if not wk_cols:
             continue
+        obj_cols = [i for i in range(ncol)
+                    if ref_hits[i] and i not in wk_cols] or [obj_col]
+
+        # The unit column, if the overview has one. Not by header - PyMuPDF drifts
+        # those - but by content: it is the column whose cells say UNIT, and it is
+        # neither the week column nor the objectives column. Every CP and LS
+        # Computing overview names its units this way; an overview without one
+        # simply gets no hint and topic_label falls back as it always did.
+        unit_hits = [0] * ncol
+        for r in grid:
+            for i, c in enumerate(r):
+                if i not in wk_cols and i not in obj_cols and re.match(UNIT_CELL, c or ''):
+                    unit_hits[i] += 1
+        unit_col = max(range(ncol), key=lambda i: unit_hits[i]) if any(unit_hits) else None
 
         def cell(r, i):
             return (r[i] or '') if i < len(r) else ''
 
-        pending = None   # (week, [objective fragments])
+        def week_of(r):
+            for i in wk_cols:
+                wn = week_number(cell(r, i))
+                if wn is not None:
+                    return wn
+            return None
+
+        def objectives_of(r):
+            return '\n'.join(c for c in (cell(r, i).strip() for i in obj_cols) if c)
+
+        unit = ''
+        pending = None   # (week, [objective fragments], unit)
         for r in grid:
-            wn = week_number(cell(r, wk_col))
+            wn = week_of(r)
+            if unit_col is not None and cell(r, unit_col).strip():
+                unit = cell(r, unit_col).strip()
             if wn is not None:
                 if pending:
-                    row = emit_row(pending[0], '\n'.join(pending[1]))
+                    row = emit_row(pending[0], '\n'.join(pending[1]), unit=pending[2])
                     if row:
                         rows.append(row)
-                pending = (wn, [cell(r, obj_col)])
+                pending = (wn, [objectives_of(r)], unit)
             elif pending:
-                frag = cell(r, obj_col)
+                frag = objectives_of(r)
                 if frag.strip():
                     pending[1].append(frag)
         if pending:
-            row = emit_row(pending[0], '\n'.join(pending[1]))
+            row = emit_row(pending[0], '\n'.join(pending[1]), unit=pending[2])
             if row:
                 rows.append(row)
     return rows
@@ -390,6 +497,13 @@ def main():
     ap.add_argument('root')
     ap.add_argument('--year', default='2026-27')
     ap.add_argument('--out', default='supabase/seed')
+    # A file the school still uses but has not re-dated. Repeatable, matched on the
+    # file name alone. Deliberately per-file rather than a switch that turns the
+    # previous-year rule off: that rule is the reason last year's overviews do not
+    # quietly become this year's, and it should take a person naming a document to
+    # get past it.
+    ap.add_argument('--accept-file', action='append', metavar='FILENAME',
+                    help='import this file even though its name says a previous year')
     args = ap.parse_args()
 
     root, out = Path(args.root), Path(args.out)
@@ -397,6 +511,8 @@ def main():
 
     claims = defaultdict(list)          # (year_group, subject, semester) -> [paths]
     excluded, unclassified = [], []
+    carried_prior = []
+    accepted = set(args.accept_file or [])
 
     for path in sorted(root.rglob('*')):
         if path.suffix.lower() not in ('.docx', '.pdf') or path.name.startswith('~$'):
@@ -405,9 +521,18 @@ def main():
             excluded.append({'file': str(path.relative_to(root)), 'why': 'named DELETE'})
             continue
         yg, subj, sem, prior = classify(path)
-        if prior:
+        if prior and path.name not in accepted:
             excluded.append({'file': str(path.relative_to(root)), 'why': 'labelled with a previous academic year'})
             continue
+        if prior:
+            # Named on the command line as still current. The rule is right and stays
+            # on for everything else - CP1 and CP3 Computing are simply documents the
+            # department has not re-dated, and the HOD said so. Still reported, because
+            # a week whose source file disagrees with the year it was imported under is
+            # something the person signing it off should be told.
+            carried_prior.append({'file': str(path.relative_to(root)),
+                                  'why': 'filename says a previous academic year; '
+                                         'accepted as current on the command line'})
         if not yg or not subj:
             unclassified.append({'file': str(path.relative_to(root)),
                                  'why': f'could not read {"year group" if not yg else "subject"} from the filename'})
@@ -494,11 +619,16 @@ def main():
             'excluded_files': len(excluded),
             'unreadable': len(failed),
             'unclassified_filenames': len(unclassified),
+            'accepted_despite_year': len(carried_prior),
         },
         'blocking_hod_decision': conflicts,
         'excluded': excluded,
         'could_not_import': failed,
         'unclassified': unclassified,
+        # Imported, but the filename says a different academic year. Not a failure and
+        # not silent - whoever signs these weeks off should know the document they are
+        # signing has last year's date on it.
+        'accepted_despite_year': carried_prior,
     }
 
     (out / 'curriculum.json').write_text(json.dumps(weeks, indent=1), encoding='utf-8')
@@ -509,6 +639,8 @@ def main():
           f"({s['weeks_with_syllabus_refs']} with syllabus refs, {s['weeks_topic_only']} topic-only)")
     print(f"{s['duplicate_conflicts']} duplicate conflicts need an HOD decision")
     print(f"{s['excluded_files']} excluded, {s['unreadable']} unreadable, {s['unclassified_filenames']} unclassified")
+    if s['accepted_despite_year']:
+        print(f"{s['accepted_despite_year']} accepted despite a previous-year filename")
     print(f"-> {out/'curriculum.json'}\n-> {out/'readiness_report.json'}")
 
 
