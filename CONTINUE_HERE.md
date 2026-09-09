@@ -33,6 +33,13 @@ Paste `supabase/migrations/0015_threads_homework.sql` into the SQL editor to swi
 
 **0017 (study pack revisions and assets) is written and NOT applied** — see the 2026-09-04 section below.
 
+**0023 (`hod_report`, `report_recipient`) is written and NOT applied.** Until it is, the HOD weekly
+report is absent rather than broken: the Thursday agenda task checks for the table and pushes
+nothing when PostgREST answers a missing relation, so every other task on the screen is unaffected.
+Paste `supabase/migrations/0023_hod_report.sql` into the SQL editor. Nothing is seeded — add the
+Coordinators and the Principal under **Admin → Reports** afterwards, or a send refuses with
+`no_recipients`.
+
 **0016 (`school_fact`) is applied and verified end to end** (2026-09-02). It holds what the school
 knows about itself that no other table does - the uniform policy, the safeguarding lead, how work
 is marked - and `lib/ask.ts` puts it in the grounding block beside the calendar, so a teacher asks
