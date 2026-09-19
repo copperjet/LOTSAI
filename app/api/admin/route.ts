@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
-import { ADMIN_ROLES, ROLES } from '@/lib/admin';
+import { ADMIN_ROLES, ROLES, SCHOOL_DOMAIN } from '@/lib/admin';
 
 export const runtime = 'nodejs';
 
@@ -23,7 +23,8 @@ export const runtime = 'nodejs';
 
 /** A problem the form has to report back. Rendered by the page that posted. */
 type Problem =
-  | 'bad_email' | 'duplicate_email' | 'bad_role' | 'missing' | 'self_role';
+  | 'bad_email' | 'duplicate_email' | 'bad_role' | 'missing' | 'self_role'
+  | 'not_school_email';
 
 export async function POST(req: NextRequest) {
   const user = await currentUser();
@@ -83,13 +84,22 @@ export async function POST(req: NextRequest) {
       if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) return back(req, 'bad_email');
       if (!ROLES.includes(role)) return back(req, 'bad_role');
 
+      // Staff are on the school's domain, and an address that is not is a typo far
+      // more often than it is a real exception. The override is a tick box rather
+      // than an absence of a check so that the exception is somebody's decision and
+      // appears in the log as one.
+      if (!email.endsWith(`@${SCHOOL_DOMAIN}`) && !str('outside_email')) {
+        return back(req, 'not_school_email');
+      }
+
       // No PIN is set here: the first sign-in chooses one, which is the path
       // everybody else took and the only one where nobody but they know it.
       const { error } = await db.from('app_user')
         .insert({ email, full_name: fullName, role, department });
       if (error) return back(req, 'duplicate_email');
 
-      await audit(user.id, 'admin.create_person', 'app_user', email, { role, department });
+      await audit(user.id, 'admin.create_person', 'app_user', email,
+        { role, department, outside_domain: !email.endsWith(`@${SCHOOL_DOMAIN}`) });
       break;
     }
     case 'set_role': {
@@ -115,11 +125,25 @@ export async function POST(req: NextRequest) {
     case 'assign_class': {
       // A class with no teacher generates nothing and appears on nobody's agenda,
       // which is a silent failure until somebody asks why a week was never planned.
+      //
+      // Adds rather than replaces, since 0026: a class can be shared between two
+      // teachers or covered by a third, and the single klass.teacher_id this used to
+      // write could only ever hold the last one saved. Removing is its own action
+      // below, so that taking somebody off a class is a thing somebody chose to do.
       const classId = str('classId');
       const teacherId = str('teacherId');
-      if (!classId) return back(req, 'missing');
-      await db.from('klass').update({ teacher_id: teacherId || null }).eq('id', classId);
-      await audit(user.id, 'admin.assign_class', 'klass', classId, { teacherId: teacherId || null });
+      if (!classId || !teacherId) return back(req, 'missing');
+      await db.from('class_teacher')
+        .upsert({ class_id: classId, user_id: teacherId }, { onConflict: 'class_id,user_id' });
+      await audit(user.id, 'admin.assign_class', 'klass', classId, { teacherId });
+      break;
+    }
+    case 'unassign_class': {
+      const classId = str('classId');
+      const teacherId = str('teacherId');
+      if (!classId || !teacherId) return back(req, 'missing');
+      await db.from('class_teacher').delete().eq('class_id', classId).eq('user_id', teacherId);
+      await audit(user.id, 'admin.unassign_class', 'klass', classId, { teacherId });
       break;
     }
     case 'resolve_gap': {

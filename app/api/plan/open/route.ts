@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser } from '@/lib/supabase';
+import { ALL_CLASSES_ROLES } from '@/lib/admin';
 
 export const runtime = 'nodejs';
 
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
   if (!planner) return NextResponse.json({ error: 'Unknown planner' }, { status: 404 });
 
   // A teacher sees their own; an HOD sees any, because reviewing is their job.
-  if (planner.teacher_id !== user.id && user.role !== 'hod') {
+  if (planner.teacher_id !== user.id && !ALL_CLASSES_ROLES.includes(user.role)) {
     return NextResponse.json({ error: 'Not yours to open' }, { status: 403 });
   }
 

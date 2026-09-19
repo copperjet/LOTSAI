@@ -24,6 +24,11 @@ import { generateWorksheet, gateWorksheet, type GenerateWorksheetInput } from '@
 import { renderWorksheet } from '@/lib/pdf/renderers/worksheet';
 import { generateHomework, gateHomework, type GenerateHomeworkInput } from '@/lib/homework';
 import { renderHomework, renderHomeworkPdf } from '@/lib/homework/render';
+import { generateLesson, type GenerateLessonInput } from '@/lib/lesson/generate';
+import { gateLesson } from '@/lib/lesson/gate';
+import { renderLessonHtml } from '@/lib/lesson/render_server';
+import { renderLessonPdf } from '@/lib/lesson/pdf';
+import { renderLessonPptx } from '@/lib/lesson/pptx';
 
 /** A generator turns assembled grounding into artefact content. The input and the
  *  output are the workflow's own; the engine passes them through, only requiring a
@@ -43,6 +48,7 @@ export const GENERATORS: Record<string, Generator> = {
   studypack: (input, userId) => generateStudyPackV2(input as GeneratePackV2Input, userId),
   worksheet: (input, userId) => generateWorksheet(input as GenerateWorksheetInput, userId),
   homework: (input, userId) => generateHomework(input as GenerateHomeworkInput, userId),
+  lesson: (input, userId) => generateLesson(input as GenerateLessonInput, userId),
 };
 
 export const GATES: Record<string, GateFn> = {
@@ -52,6 +58,7 @@ export const GATES: Record<string, GateFn> = {
   studypack: (studyPackId) => gateStudyPackV2(studyPackId),
   worksheet: (worksheetId) => gateWorksheet(worksheetId),
   homework: (homeworkId) => gateHomework(homeworkId),
+  lesson: (lessonId) => gateLesson(lessonId),
 };
 
 export const RENDERERS: Record<string, Renderer> = {
@@ -66,4 +73,9 @@ export const RENDERERS: Record<string, Renderer> = {
   // pair: the HTML a teacher opens, and the browser print of it that goes to Drive.
   homework: (homeworkId) => renderHomework(homeworkId),
   'homework-pdf': (homeworkId) => renderHomeworkPdf(homeworkId),
+  // A lesson has three renderings, and the PowerPoint is the one that matters:
+  // it needs no browser, so it is the export that cannot fail on a cold start.
+  lesson: (lessonId) => renderLessonHtml(lessonId),
+  'lesson-pdf': (lessonId) => renderLessonPdf(lessonId),
+  'lesson-pptx': (lessonId) => renderLessonPptx(lessonId),
 };

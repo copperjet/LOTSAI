@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, audit } from '@/lib/supabase';
+import { classIdsFor } from '@/lib/classes';
 import {
   SESSION_COOKIE, SESSION_DAYS, LOCK_AFTER, LOCK_MINUTES,
   hashPin, verifyPin, pinShape, newSessionToken, sessionDigest,
@@ -10,18 +11,32 @@ export const runtime = 'nodejs';
 /**
  * POST /api/signin  { who, pin, again?, next }
  *
- * Two jobs in one handler, because to the teacher they are one action: set a
- * PIN the first time, check it every time after.
+ * `who` is a school email address. It used to be an app_user id chosen from a
+ * dropdown of every member of staff, which published the staff list and offered a
+ * form for claiming any account that had not set a PIN yet.
+ *
+ * Two jobs in one handler, because to the teacher they are one action: set a PIN
+ * the first time, check it every time after. `again` is only read on the first,
+ * and is ignored rather than refused afterwards, so that the page can show both
+ * fields to everybody and never disclose which addresses are staff accounts.
  *
  * Every failure answers in the same shape and after the same delay. A person
- * standing at this form must not be able to tell an unknown name from a wrong
- * PIN from a locked account — the first of those would otherwise be a way to
- * enumerate the staff list, and the last a way to confirm you had found a real
- * account by getting it locked.
+ * standing at this form must not be able to tell an unknown address from a wrong
+ * PIN from a locked account — the first of those would otherwise be a way to test
+ * addresses against the staff list, and the last a way to confirm you had found a
+ * real account by getting it locked.
+ *
+ * What this does not do is prove the person typing owns that mailbox. An address
+ * is not a secret and the PIN is self-set, so an insider who knows a colleague's
+ * address can claim an account the colleague has not claimed yet. That is a
+ * deliberate trade for a twenty-person school and not an oversight; audit_log
+ * records every signin.pin_set against a time, which is what makes it recoverable.
+ * Verifying the mailbox - a code sent to it, or Google sign-in restricted to the
+ * school's domain - is the change that closes it.
  */
 export async function POST(req: NextRequest) {
   const form = await req.formData();
-  const who = String(form.get('who') ?? '');
+  const who = String(form.get('who') ?? '').trim().toLowerCase();
   const pin = String(form.get('pin') ?? '');
   const again = String(form.get('again') ?? '');
   const next = String(form.get('next') ?? '/');
@@ -31,8 +46,8 @@ export async function POST(req: NextRequest) {
 
   const db = admin();
   const { data: user } = await db.from('app_user')
-    .select('id, email, full_name, pin_hash, is_active, failed_attempts, locked_until')
-    .eq('id', who).maybeSingle();
+    .select('id, email, full_name, role, pin_hash, is_active, failed_attempts, locked_until')
+    .eq('email', who).maybeSingle();
 
   if (!user || user.is_active === false) return back(req, 'nobody', next);
 
@@ -40,6 +55,7 @@ export async function POST(req: NextRequest) {
     return back(req, 'locked', next, who);
   }
 
+  let firstTime = false;
   if (!user.pin_hash) {
     // First sign-in: this is where the PIN comes from.
     const wrong = pinShape(pin);
@@ -49,6 +65,7 @@ export async function POST(req: NextRequest) {
       .update({ pin_hash: await hashPin(pin), pin_set_at: new Date().toISOString() })
       .eq('id', user.id);
     await audit(user.id, 'signin.pin_set');
+    firstTime = true;
   } else if (!(await verifyPin(pin, user.pin_hash))) {
     const attempts = (user.failed_attempts ?? 0) + 1;
     await db.from('app_user').update({
@@ -72,7 +89,18 @@ export async function POST(req: NextRequest) {
     .eq('id', user.id);
   await audit(user.id, 'signin.success');
 
-  const res = NextResponse.redirect(new URL(next.startsWith('/') ? next : '/', req.url), 303);
+  // A teacher who has never said which classes they teach has an empty agenda and no
+  // way to find out why, so the first sign-in goes to the picker instead of the front
+  // page. Checked on every sign-in rather than only the first, because somebody who
+  // skipped it once should be asked again. Roles that see every class have nothing to
+  // pick and are never sent there.
+  let to = next.startsWith('/') ? next : '/';
+  if (firstTime || to === '/') {
+    const ids = await classIdsFor(db, user);
+    if (ids?.length === 0) to = '/welcome';
+  }
+
+  const res = NextResponse.redirect(new URL(to, req.url), 303);
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true, sameSite: 'lax', path: '/',
     secure: process.env.NODE_ENV === 'production',

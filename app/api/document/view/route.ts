@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser } from '@/lib/supabase';
+import { ALL_CLASSES_ROLES } from '@/lib/admin';
 import * as engine from '@/lib/engine';
 import { FORMAT } from '@/lib/pdf/store';
+import { renderLessonHtml } from '@/lib/lesson/render_server';
 
 export const runtime = 'nodejs';
 
@@ -29,14 +31,32 @@ const BUCKET = 'artefacts';
  * the *Standard key* (weekly_planner/…), which is not the renderer id (planner) —
  * resolving it through the engine is what stops the two drifting apart.
  */
-const KIND: Record<string, { workflow: string; renderer: string; table: string | null }> = {
+const KIND: Record<string, {
+  workflow: string; renderer: string; table: string | null;
+  /**
+   * How the browser should treat the bytes. Everything here is `inline` except
+   * the PowerPoint: a .pptx rendered inline is a tab full of binary, and what a
+   * teacher clicking "Download the PowerPoint" wants is a file on their machine.
+   */
+  disposition?: 'inline' | 'attachment';
+}> = {
   'studypack-html': { workflow: 'study_pack',     renderer: 'studypack',     table: 'study_pack' },
   'studypack-pdf':  { workflow: 'study_pack',     renderer: 'studypack-pdf', table: null },
   worksheet:        { workflow: 'worksheet',      renderer: 'worksheet',     table: 'worksheet' },
   planner:          { workflow: 'weekly_planner', renderer: 'planner',       table: null },
   homework:         { workflow: 'homework',       renderer: 'homework',      table: 'homework' },
   'homework-pdf':   { workflow: 'homework',       renderer: 'homework-pdf',  table: null },
+  lesson:           { workflow: 'lesson',         renderer: 'lesson',        table: 'lesson' },
+  'lesson-pdf':     { workflow: 'lesson',         renderer: 'lesson-pdf',    table: null },
+  'lesson-pptx':    { workflow: 'lesson',         renderer: 'lesson-pptx',   table: null,
+    disposition: 'attachment' },
 };
+
+/** A filename a teacher will recognise in their downloads folder. */
+function slug(s: string): string {
+  return String(s ?? '').normalize('NFKD').replace(/[^\w\s-]/g, '')
+    .trim().replace(/\s+/g, '-').slice(0, 60) || 'lesson';
+}
 
 export async function GET(req: NextRequest) {
   const db = admin();
@@ -56,13 +76,44 @@ export async function GET(req: NextRequest) {
     const { data: planner } = await db.from('planner')
       .select('teacher_id').eq('id', id).maybeSingle();
     if (!planner) return NextResponse.json({ error: 'Unknown planner' }, { status: 404 });
-    if (planner.teacher_id !== user.id && user.role !== 'hod') {
+    if (planner.teacher_id !== user.id && !ALL_CLASSES_ROLES.includes(user.role)) {
       return NextResponse.json({ error: 'Not yours to open' }, { status: 403 });
     }
   }
 
   const { standard } = await engine.resolveWorkflow(spec.workflow);
   const fmt = FORMAT[spec.renderer];
+
+  // A lesson is one teacher's work until they approve it, exactly as a planner is.
+  if (kind.startsWith('lesson')) {
+    const { data: lesson } = await db.from('lesson')
+      .select('author_id, approved').eq('id', id).maybeSingle();
+    if (!lesson) return NextResponse.json({ error: 'Unknown lesson' }, { status: 404 });
+    if (!lesson.approved && lesson.author_id !== user.id && !ALL_CLASSES_ROLES.includes(user.role)) {
+      return NextResponse.json({ error: 'Not yours to open' }, { status: 403 });
+    }
+  }
+
+  // The lesson deck is rendered now, not read from storage. Every edit in the
+  // editor saves the deck but only generation and approval re-store the HTML, so
+  // the stored copy was the lesson as generated - "Open the deck" showed none of
+  // the teacher's changes. Rendering is pure and needs no browser, so it is cheap
+  // enough to do on every open; the stored file stays as the archival copy.
+  if (kind === 'lesson') {
+    try {
+      const html = new TextDecoder().decode(await renderLessonHtml(id));
+      return new NextResponse(html, {
+        status: 200,
+        headers: {
+          'Content-Type': fmt.contentType,
+          'Content-Disposition': `inline; filename="${id}.${fmt.ext}"`,
+          'Cache-Control': 'private, no-store',
+        },
+      });
+    } catch {
+      return notRendered();
+    }
+  }
 
   // The row's own storage_path is what storeArtefact recorded; the derived path is
   // the fallback for a render made before that column was written.
@@ -76,12 +127,21 @@ export async function GET(req: NextRequest) {
   const { data: blob, error } = await db.storage.from(BUCKET).download(path);
   if (error || !blob) return notRendered();
 
+  // A download deserves the artefact's own name, not a uuid.
+  let name = `${id}.${fmt.ext}`;
+  if (spec.disposition === 'attachment') {
+    // Only the PowerPoint downloads today, and its bytes are addressed by the
+    // lesson row even though the renderer's FORMAT entry has no table of its own.
+    const { data: row } = await db.from('lesson').select('title').eq('id', id).maybeSingle();
+    if (row?.title) name = `${slug(row.title as string)}.${fmt.ext}`;
+  }
+
   const bytes = new Uint8Array(await blob.arrayBuffer());
   return new NextResponse(bytes, {
     status: 200,
     headers: {
       'Content-Type': fmt.contentType,
-      'Content-Disposition': `inline; filename="${id}.${fmt.ext}"`,
+      'Content-Disposition': `${spec.disposition ?? 'inline'}; filename="${name}"`,
       // Private: the bytes are one school's work, and the gate cookie is what
       // authorised this response. A shared cache must never hand it to anyone else.
       'Cache-Control': 'private, max-age=300',

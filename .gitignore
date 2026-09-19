@@ -24,3 +24,7 @@ __pycache__/
 
 # Local staff address list — real addresses, never committed.
 emails.txt
+
+# The staff list (real names and addresses). Applied by hand, never committed:
+# the repository is public. See supabase/migrations/0027_staff.sql.
+supabase/local/

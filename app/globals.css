@@ -737,3 +737,233 @@ button.abtn:disabled:hover{background:var(--forest);}
   .mgrid{grid-template-columns:1fr;}
   .mlist{max-height:none;}
 }
+
+/* The third door: which classes do you teach. Same palette as the gate (it reuses
+   .gatepage for that), but a wide card holding two hundred checkboxes rather than a
+   narrow one holding two fields - so it is left-aligned and scrolls inside itself. */
+.welcard{position:relative;z-index:1;width:100%;max-width:760px;background:var(--card);
+  border:1px solid var(--line-soft);border-radius:18px;box-shadow:var(--shadow);
+  padding:26px 28px;display:flex;flex-direction:column;gap:12px;}
+.welcard h1{font-size:23px;}
+.welcard>p{font-size:13.5px;color:var(--muted);}
+.welgroups{max-height:52vh;overflow:auto;border:1px solid var(--line-soft);
+  border-radius:14px;padding:4px 14px;}
+.welgroup{padding:10px 0;border-bottom:1px solid var(--line-soft);}
+.welgroup:last-child{border-bottom:0;}
+.welgroup>b{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:7px;}
+.welpick{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:2px 14px;}
+.welpick label{display:flex;gap:8px;align-items:center;font-size:14px;padding:3px 0;cursor:pointer;}
+.welcard footer{display:flex;gap:10px;align-items:center;justify-content:space-between;}
+.welcard footer small{font-size:12px;color:var(--muted);}
+
+/* ===================================================================== lesson
+   The lesson editor (app/lesson/[id]/Editor.tsx).
+
+   Three panes: the slides, the slide, and everything about it the class never
+   sees. It is the only full-height screen in the app that is not the chat, so it
+   owns the viewport and scrolls its panes independently rather than the page.
+
+   The canvas itself is an iframe carrying the deck's own stylesheet
+   (lib/lesson/render_html.ts) - in millimetres, cqw and its own fonts. Nothing
+   in here styles a slide; the two stylesheets never meet, which is the point of
+   the iframe.
+
+   Below 1000px the three panes stack, the rail becomes a horizontal strip and
+   the canvas keeps its 16:9. A teacher checking tomorrow's lesson on a phone is
+   reading it, not rebuilding it, so the rail scrolls sideways and the inspector
+   comes last. */
+
+.led{position:relative;display:flex;flex-direction:column;height:100dvh;background:var(--rail);color:var(--ink);}
+.led.empty{align-items:center;justify-content:center;}
+.lnone{color:var(--muted);font-size:14px;}
+
+.lbar{display:flex;align-items:center;gap:14px;padding:9px 16px;background:var(--card);
+  border-bottom:1px solid var(--line);flex:0 0 auto;}
+.lback{font-size:12.5px;color:var(--muted);text-decoration:none;white-space:nowrap;}
+.lback:hover{color:var(--forest);}
+.lwho{display:flex;flex-direction:column;line-height:1.35;min-width:0;}
+.lwho strong{font-family:var(--display);font-size:15px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;}
+.lwho span{font-size:12px;color:var(--muted);}
+.lacts{margin-left:auto;display:flex;gap:7px;align-items:center;flex-wrap:wrap;
+  justify-content:flex-end;}
+.lbadge{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  background:var(--ok-tint);color:var(--ok);padding:4px 9px;border-radius:999px;}
+
+.lbtn{font:inherit;font-size:13px;padding:7px 13px;border:1px solid var(--line);
+  border-radius:999px;background:var(--paper);color:var(--ink);cursor:pointer;
+  text-decoration:none;white-space:nowrap;}
+.lbtn:hover:not(:disabled){border-color:var(--forest);}
+.lbtn.primary{background:var(--forest);border-color:var(--forest);color:#fff;}
+.lbtn.primary:hover:not(:disabled){background:var(--forest-deep);}
+.lbtn.wide{width:100%;text-align:center;}
+.lbtn:disabled{opacity:.5;cursor:not-allowed;}
+
+.lproblem,.lnote-bar{margin:0;padding:8px 16px;font-size:13px;flex:0 0 auto;}
+.lproblem{background:var(--bad-tint);color:var(--bad);cursor:pointer;}
+.lnote-bar{background:var(--forest-tint);color:var(--forest-deep);cursor:pointer;}
+.lnote-bar a{color:inherit;}
+
+.lpanes{flex:1;min-height:0;display:grid;grid-template-columns:248px minmax(0,1fr) 320px;gap:0;}
+.led.presenting .lpanes{grid-template-columns:minmax(0,1fr) 320px;}
+.led.presenting .lrail{display:none;}
+
+/* ---------------------------------------------------------------- the rail */
+.lrail{border-right:1px solid var(--line);background:var(--card);overflow:auto;
+  display:flex;flex-direction:column;}
+.lrail ol{list-style:none;margin:0;padding:6px;flex:1;}
+.lsrow{width:100%;display:flex;gap:8px;align-items:flex-start;text-align:left;
+  background:none;border:1px solid transparent;border-radius:10px;padding:7px 8px;
+  cursor:pointer;font:inherit;color:inherit;}
+.lsrow:hover{background:var(--sunk);}
+.lsrow.on{background:var(--forest-tint);border-color:var(--forest-light);}
+.lsnum{flex:0 0 auto;width:20px;font-size:11px;color:var(--muted);padding-top:2px;
+  font-variant-numeric:tabular-nums;}
+.lsbody{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.lsphase{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);}
+.lstitle{font-size:12.5px;line-height:1.3;overflow:hidden;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.lsmeta{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px;}
+.lsdot{width:7px;height:7px;border-radius:50%;background:var(--line);display:block;}
+.lsdot.student{background:var(--gold-bright);}
+.lsmin{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;}
+
+.lrailfoot{position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--line);
+  padding:8px;display:flex;flex-direction:column;gap:7px;}
+.lmoves{display:flex;gap:5px;}
+.lmini{font:inherit;font-size:11.5px;padding:5px 9px;border:1px solid var(--line);
+  border-radius:8px;background:var(--paper);color:var(--ink);cursor:pointer;}
+.lmini:hover:not(:disabled){border-color:var(--forest);}
+.lmini:disabled{opacity:.4;cursor:not-allowed;}
+.lmini.wide{width:100%;}
+.lmini.bad:hover:not(:disabled){border-color:var(--bad);color:var(--bad);}
+.laddphase{display:flex;flex-wrap:wrap;gap:5px;}
+.lhint{font-size:11px;color:var(--muted);line-height:1.4;margin:0;}
+
+/* -------------------------------------------------------------- the canvas */
+.lcanvas{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:12px;padding:18px;overflow:auto;min-width:0;background:var(--rail);}
+.lstage{width:100%;max-width:980px;aspect-ratio:16 / 9;background:var(--card);
+  border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);overflow:hidden;}
+.lstage iframe{width:100%;height:100%;border:0;display:block;background:var(--card);}
+/* ---------------------------------------------------------- presenting
+   The slide alone, as large as the screen allows at 16:9. Dark around it so the
+   slide is the only lit thing on the wall. Nothing from the editor shows here -
+   the teaching guide is in its own window (/lesson/[id]/notes). */
+.lshow{position:fixed;inset:0;z-index:100;background:#0d0f0e;display:flex;
+  align-items:center;justify-content:center;}
+.lshowstage{position:relative;width:min(100vw,calc(100vh * 16 / 9));aspect-ratio:16 / 9;}
+.lshowstage iframe{width:100%;height:100%;border:0;display:block;background:#fff;}
+.lshowhit{position:absolute;inset:0;background:transparent;border:0;cursor:pointer;}
+.lshowbar{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:6px;
+  align-items:center;background:rgba(20,22,21,.86);color:#e8ece9;border-radius:999px;
+  padding:6px 10px;font-size:13px;transition:opacity .25s;}
+.lshowbar button{font:inherit;font-size:12.5px;color:#fff;background:transparent;
+  border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:5px 11px;cursor:pointer;}
+.lshowbar button:disabled{opacity:.35;cursor:default;}
+.lshowbar button[aria-pressed="true"]{background:rgba(255,255,255,.18);}
+.lshow.quiet{cursor:none;}
+.lshow.quiet .lshowbar{opacity:0;pointer-events:none;}
+
+/* ------------------------------------------------------- presenter notes */
+.lnotesview{max-width:720px;margin:0 auto;padding:16px 18px 40px;display:flex;flex-direction:column;
+  gap:12px;color:var(--ink);}
+.lnoteshead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+.lnoteshead h1{font-family:var(--display);font-size:20px;margin:0;}
+.lnoteshead span{color:var(--muted);font-size:13px;}
+.lnotesnav{display:flex;gap:6px;flex-wrap:wrap;}
+.lnotesblock{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;}
+.lnotesblock h2{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--gold);margin:0 0 4px;}
+.lnotesblock p{margin:0 0 6px;font-size:15px;line-height:1.5;}
+.lnotesblock ul{margin:0;padding-left:18px;font-size:15px;line-height:1.5;}
+.lnotesanswer{border-color:var(--forest);background:var(--forest-tint);}
+.lnoteswait{color:var(--muted);font-size:14px;}
+.lthemes{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:980px;}
+.ltheme{display:flex;flex-direction:column;align-items:center;gap:4px;padding:5px 7px;
+  background:var(--card);border:1px solid var(--line);border-radius:9px;cursor:pointer;
+  font:inherit;color:var(--ink);}
+.ltheme:hover:not(:disabled){border-color:var(--forest);}
+.ltheme.on{border-color:var(--forest);box-shadow:0 0 0 2px var(--forest-tint);}
+.lswatch{display:flex;width:56px;height:12px;border-radius:4px;overflow:hidden;}
+.lswatch span{flex:1;}
+.lthemename{font-size:10.5px;color:var(--muted);white-space:nowrap;}
+
+/* ----------------------------------------------------------- the inspector */
+.linsp{border-left:1px solid var(--line);background:var(--card);overflow:auto;
+  padding:14px 15px 40px;display:flex;flex-direction:column;gap:11px;}
+.lsection{font-family:var(--display);font-size:12px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--forest);margin:10px 0 0;padding-top:10px;
+  border-top:1px solid var(--line-soft);}
+.lfield{display:flex;flex-direction:column;gap:4px;}
+.lfieldlabel{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);margin:0;display:flex;gap:7px;align-items:baseline;}
+.lreadonly{font-size:12.5px;line-height:1.5;margin:0;}
+.lmark{font-size:9.5px;letter-spacing:0;text-transform:none;font-weight:600;}
+.lmark.ok{color:var(--ok);}
+.lmark.bad{color:var(--bad);}
+.lcell{font-size:12.5px;line-height:1.5;border:1px solid var(--line-soft);border-radius:8px;
+  padding:6px 8px;background:var(--paper);min-height:30px;white-space:pre-wrap;}
+.lcell.multi{min-height:46px;}
+.lcell:focus{outline:2px solid var(--forest-light);outline-offset:1px;background:var(--card);}
+.lcell:empty::before{content:attr(data-placeholder);color:var(--muted);font-style:italic;}
+.lrow{display:flex;gap:9px;align-items:center;}
+.lnum{width:68px;font:inherit;font-size:12.5px;padding:5px 7px;border:1px solid var(--line-soft);
+  border-radius:8px;background:var(--paper);color:var(--ink);}
+.lobj{margin:0;padding-left:15px;font-size:12px;line-height:1.5;color:var(--ink);}
+.loref{color:var(--gold);font-weight:700;margin-right:5px;}
+
+.limprove{display:flex;flex-direction:column;gap:7px;}
+.lblock{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line-soft);
+  border-radius:10px;padding:9px;}
+.lblocktype{font-size:11px;font-weight:700;color:var(--forest);margin:0;}
+.lrecords{display:flex;flex-direction:column;gap:7px;}
+.lrecord{display:flex;flex-direction:column;gap:6px;border-left:2px solid var(--line);padding-left:8px;}
+.lrecord .lfieldlabel{justify-content:space-between;}
+.lmini.tiny{font-size:10px;padding:2px 7px;}
+.lcheckrow{display:flex;gap:7px;align-items:center;font-size:12px;}
+.lchip.on{border-color:var(--forest);background:var(--forest-tint);font-weight:600;}
+.lhistory{position:absolute;right:16px;top:58px;z-index:20;width:min(420px,calc(100vw - 32px));
+  max-height:60vh;overflow:auto;background:var(--card);border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--shadow);padding:12px;}
+.lhistory ol{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;}
+.lhistory li{display:flex;gap:8px;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--line-soft);padding-bottom:6px;}
+.lhistory li span{display:flex;flex-direction:column;font-size:12px;min-width:0;}
+.lhistory li small{color:var(--muted);font-size:11px;}
+.lpicture{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line-soft);
+  border-radius:10px;padding:9px;font-size:12px;}
+.limprovemenu{display:flex;flex-wrap:wrap;gap:5px;}
+.lchip{font:inherit;font-size:11.5px;padding:5px 10px;border:1px solid var(--line);
+  border-radius:999px;background:var(--paper);color:var(--ink);cursor:pointer;}
+.lchip:hover{border-color:var(--forest);background:var(--forest-tint);}
+.lchip.tiny{font-size:10.5px;padding:3px 8px;}
+
+/* ---------------------------------------------------------------- the gate */
+.lgate{display:flex;flex-direction:column;gap:8px;}
+.lgatesum{font-size:12px;color:var(--muted);margin:0;}
+.lcheck{border-left:3px solid var(--line);padding:2px 0 2px 9px;}
+.lcheck.pass{border-color:var(--ok);}
+.lcheck.warn{border-color:var(--warn);}
+.lcheck.block{border-color:var(--bad);}
+.lchecktitle{font-size:12px;font-weight:700;margin:0;}
+.lcheckdetail{font-size:11.5px;color:var(--muted);line-height:1.45;margin:2px 0 0;}
+.lcheckslides{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 0;}
+
+/* -------------------------------------------------------------- the timing */
+.ltime{font-variant-numeric:tabular-nums;}
+.ltime.over{color:var(--bad);font-weight:700;}
+
+/* ---------------------------------------------------------------- narrow */
+@media (max-width:1000px){
+  .led{height:auto;min-height:100dvh;}
+  .lpanes,.led.presenting .lpanes{display:flex;flex-direction:column;}
+  .lrail{border-right:0;border-bottom:1px solid var(--line);max-height:none;}
+  .lrail ol{display:flex;gap:6px;overflow-x:auto;padding:8px;}
+  .lrail li{flex:0 0 190px;}
+  .lsrow{height:100%;}
+  .lrailfoot{position:static;}
+  .lcanvas{padding:12px;}
+  .linsp{border-left:0;border-top:1px solid var(--line);}
+  .led.presenting .lrail{display:flex;}
+}

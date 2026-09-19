@@ -108,7 +108,7 @@ async function main() {
   const { data: users } = await db.from('app_user').select('id, full_name');
   const uid = (n) => users.find(u => u.full_name === n)?.id;
 
-  await db.from('klass').upsert([
+  const CLASSES = [
     { id: 'CP4A-MATH', name: 'CP4A Mathematics', year_group: 'CP4', subject_id: 'MATH', teacher_id: uid('Richard Mwanza'), periods_per_week: 5 },
     { id: 'CP4B-MATH', name: 'CP4B Mathematics', year_group: 'CP4', subject_id: 'MATH', teacher_id: uid('Denny Sepiso'), periods_per_week: 5 },
     { id: 'CP4A-SCI',  name: 'CP4A Science',     year_group: 'CP4', subject_id: 'SCI',  teacher_id: uid('Richard Mwanza'), periods_per_week: 3 },
@@ -119,7 +119,16 @@ async function main() {
     // to CP4A Mathematics pending HOD confirmation.
     { id: 'CP4A-ENG',  name: 'CP4A English',     year_group: 'CP4', subject_id: 'ENG',  teacher_id: uid('Richard Mwanza'), periods_per_week: 5 },
     { id: 'CP4B-ENG',  name: 'CP4B English',     year_group: 'CP4', subject_id: 'ENG',  teacher_id: uid('Denny Sepiso'), periods_per_week: 5 },
-  ]).then(ok('classes'));
+  ];
+  await db.from('klass').upsert(CLASSES).then(ok('classes'));
+
+  // Allocation lives in class_teacher since 0026 and klass.teacher_id is no longer
+  // read by anything. Written from the same list so the demo has the agendas it has
+  // always had rather than six classes nobody teaches.
+  await db.from('class_teacher')
+    .upsert(CLASSES.filter(k => k.teacher_id)
+      .map(k => ({ class_id: k.id, user_id: k.teacher_id })), { onConflict: 'class_id,user_id' })
+    .then(ok('class allocations'));
 
   await db.from('resource_inventory')
     .upsert(INVENTORY.map(([subject_id, year_group, label]) => ({ subject_id, year_group, label })))

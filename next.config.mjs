@@ -15,7 +15,12 @@ export default {
   // puppeteer-core and @sparticuz/chromium are external for the same reason: the
   // chromium package unpacks a brotli-compressed binary from its own directory at
   // run time, which bundling defeats.
-  serverExternalPackages: ['pdfjs-dist', 'mammoth', 'puppeteer-core', '@sparticuz/chromium'],
+  //
+  // pptxgenjs is pure JavaScript and needs no binary traced into the lambda, but
+  // it is external for the third reason on this list: it resolves its own JSZip
+  // and its image sizing at run time, and bundling it into a route handler is a
+  // way to find that out in production.
+  serverExternalPackages: ['pdfjs-dist', 'mammoth', 'puppeteer-core', '@sparticuz/chromium', 'pptxgenjs'],
 
   // Leaving them external is necessary but not sufficient. In Node, pdfjs sets
   // GlobalWorkerOptions.workerSrc ||= "./pdf.worker.mjs" and import()s that path at
@@ -41,6 +46,10 @@ export default {
     '/api/studypack/pdf': ['./node_modules/@sparticuz/chromium/bin/**'],
     '/api/studypack/approve': ['./node_modules/@sparticuz/chromium/bin/**'],
     '/api/homework/approve': ['./node_modules/@sparticuz/chromium/bin/**'],
+    // A lesson's PDF is the browser print of its own deck. The PowerPoint needs
+    // no browser, which is why it is the export a teacher is pointed at.
+    '/api/lesson/pdf': ['./node_modules/@sparticuz/chromium/bin/**'],
+    '/api/lesson/approve': ['./node_modules/@sparticuz/chromium/bin/**'],
     '/api/ingest/upload': [
       './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
       // mammoth resolves its own files the same way, and a .docx upload has never

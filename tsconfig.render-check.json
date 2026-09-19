@@ -29,6 +29,8 @@
     "lib/pdf/renderers/studypack_v2.ts",
     "lib/pdf/layout.ts",
     "lib/pdf/branding.ts",
-    "lib/homework/render_html.ts"
+    "lib/homework/render_html.ts",
+    "scripts/render_check_lesson.ts",
+    "scripts/live_check_lesson.ts"
   ]
 }

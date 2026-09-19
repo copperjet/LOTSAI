@@ -1,4 +1,7 @@
 import { mockTriage, mockReply } from './mail/mocks';
+import {
+  mockLessonFill, mockLessonImprove, mockLessonOutline, mockLessonRepair,
+} from './lesson/mocks';
 /**
  * Fixtures for MOCK_LLM=1 (see lib/llm.ts).
  *
@@ -524,6 +527,12 @@ export function mockFor(workflow: string, cached: string, prompt: string): unkno
   if (workflow === 'studypack_outcomes') return mockOutcomes(prompt);
   if (workflow === 'worksheet_create') return mockWorksheet(cached);
   if (workflow === 'homework_create') return mockHomework(cached);
+  // Lesson fixtures live beside the lesson, in lib/lesson/mocks.ts, because the
+  // blueprint and the block vocabulary they have to agree with are there.
+  if (workflow === 'lesson_outline') return mockLessonOutline(cached, prompt);
+  if (workflow === 'lesson_fill') return mockLessonFill(cached, prompt);
+  if (workflow === 'lesson_repair') return mockLessonRepair(cached, prompt);
+  if (workflow === 'lesson_improve') return mockLessonImprove(cached, prompt);
   if (workflow === 'school_fact_read') return mockSchoolFacts(prompt);
   // Plain text, not JSON: the OCR call has no schema, so lib/llm.ts returns
   // whatever the fixture is verbatim.

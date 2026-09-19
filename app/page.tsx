@@ -56,6 +56,7 @@ type TurnKind =
   | 'packRevised'
   | 'worksheetCard' | 'worksheetFirst' | 'worksheetMatch' | 'approved'
   | 'homeworkPicker' | 'homeworkCard' | 'homeworkFirst' | 'homeworkMatch'
+  | 'lessonPicker' | 'lessonMatch' | 'lessonCard'
   | 'evaluatePrompt' | 'evaluated' | 'queuedOffline'
   | 'bank' | 'reviewCard' | 'registry' | 'coverage';
 
@@ -132,6 +133,7 @@ const TURN_TITLES: Partial<Record<TurnKind, string>> = {
   taskMenu: 'New task', planPicker: 'Plan a week', packPicker: 'Study pack',
   worksheetPicker: 'Worksheet', uploadCard: 'From a file', pasteCard: 'From pasted notes',
   homeworkPicker: 'Homework', homeworkCard: 'Homework',
+  lessonPicker: 'Make a lesson', lessonMatch: 'Make a lesson', lessonCard: 'Lesson',
   plannerCard: 'Weekly planner', packCard: 'Study pack', worksheetCard: 'Worksheet',
   evaluatePrompt: 'Lesson evaluation', evaluated: 'Lesson evaluation',
   bank: 'Shared bank', reviewCard: 'Planner review', registry: 'Curriculum sign-off',
@@ -157,7 +159,41 @@ interface ClassWeek {
   semester: number;
   status: string | null; signedOff: boolean; topic: string | null;
 }
-interface ClassCal { id: string; name: string; subject_id: string; year_group: string; weeks: ClassWeek[] }
+interface ClassCal {
+  id: string; name: string; subject_id: string; year_group: string; weeks: ClassWeek[];
+  /** Whether the user teaches this class, rather than only being able to see it. */
+  mine?: boolean;
+}
+
+/** What /api/lesson/match answers before anything is generated: what the lesson
+ *  would contain, whether it fits, and whether a colleague has already made it. */
+interface LessonPlan {
+  slides: number; minStudentSlides: number; summary: string;
+  phases: { label: string; minutes: number; slides: number }[];
+}
+interface LessonMatchResult {
+  blocked?: string; message?: string;
+  who: { className: string | null; subjectName: string; yearGroup: string;
+         ageBand: string; subjectProfile: string };
+  topic: string; subtopic: string | null; durationMinutes: number;
+  objectives: { ref: string | null; text: string; source: string }[];
+  deferred: { ref: string | null; text: string }[];
+  plan: LessonPlan;
+  matches: { id: string; title: string; why: string; mode: string;
+             author: string | null; reuseCount: number; minutes: number; mine: boolean }[];
+}
+interface LessonResult {
+  lessonId: string; title: string; subtitle: string | null;
+  slides: number; minutes: number; duration: number;
+  studentSlides: number; visualSlides: number; questions: number;
+  refs: string[]; objectives: { ref: string | null; text: string }[];
+  timing: { label: string; minutes: number }[];
+  outline: { id: string; title: string; phase: string; minutes: number; audience: string }[];
+  gate: { passed: number; warnings: number; blocking: number;
+          checks: { id: string; status: string; title: string; detail: string }[] };
+  calls: number; repaired: number;
+  editorUrl: string; pptxUrl: string; url: string;
+}
 /**
  * Who reviews, and who reads the meters.
  *
@@ -170,10 +206,15 @@ interface ClassCal { id: string; name: string; subject_id: string; year_group: s
 const REVIEWER_ROLES = ['hod', 'coordinator', 'principal', 'admin'];
 const ADMIN_ROLES = ['admin', 'principal'];
 
+/** Who sees every class rather than only their own. Wider than REVIEWER_ROLES on
+ *  purpose: a lead teacher looks across the school and signs nothing off. Kept in
+ *  step with ALL_CLASSES_ROLES in lib/admin.ts, which is what the routes enforce. */
+const ALL_CLASSES_ROLES = ['lead_teacher', ...REVIEWER_ROLES];
+
 /** app_user.role is a database value. The rail is not the place to print one. */
 const ROLE_SAYS: Record<string, string> = {
-  teacher: 'Teacher', hod: 'Head of Department', coordinator: 'Coordinator',
-  principal: 'Principal', admin: 'Administrator',
+  teacher: 'Teacher', lead_teacher: 'Lead Teacher', hod: 'Head of Department',
+  coordinator: 'Coordinator', principal: 'Principal', admin: 'Administrator',
 };
 
 interface Hit { id: string; label: string; note: string; kind: string; payload: Record<string, unknown> }
@@ -288,6 +329,12 @@ const PHASES: Record<string, string[]> = {
               'Writing the key ideas.',
               'Making the quizzes and the glossary.',
               'Nearly there.'],
+  // Three model calls and a quality check. The lines are what is actually
+  // happening, in order, so a teacher watching them learns what the thing does.
+  lesson:    ['Right. Planning the lesson before writing it.',
+              'Working out how long each part of the period gets.',
+              'Writing the slides and the teaching notes.',
+              'Checking it against the objectives before you see it.'],
   worksheet: ['Writing the tasks, in three levels.',
               'Reading the week’s objectives.',
               'Making a support version and an extension of each one.',
@@ -535,6 +582,7 @@ export default function App() {
       case 'taskMenu':
         return <TaskMenu role={user?.role ?? 'teacher'} onPick={startTask} actions={{
           plan: doPlanPicker, worksheet: doWorksheet, pack: doStudyPack, homework: doHomework,
+          lesson: doLesson,
           evaluate: doEvaluate, upload: () => doPackFromUpload(),
           review: doReview, registry: doRegistry, coverage: doCoverage, bank: doBank,
         }} />;
@@ -805,6 +853,23 @@ export default function App() {
                                 asks="Which class, and which week&rsquo;s objectives should the homework cover?"
                                 onPick={(classId, weekNumber, semester) => doHomeworkMatch(classId, weekNumber, semester)} />;
 
+      case 'lessonPicker':
+        return <LessonPicker classes={d.classes as ClassCal[]}
+                             onPick={p => doLessonMatch(p)} />;
+
+      case 'lessonMatch':
+        return <LessonMatchCard r={d.r as LessonMatchResult}
+                                ask={d.ask as LessonAsk}
+                                onBuild={() => doLessonGenerate(d.ask as LessonAsk)}
+                                onOpen={id => window.open(`/lesson/${id}`, '_blank')} />;
+
+      case 'lessonCard': {
+        const r = d.r as LessonResult;
+        return <LessonCard r={r}
+                           onEdit={() => window.open(r.editorUrl, '_blank')}
+                           onExport={() => doLessonExport(r.lessonId, r.pptxUrl)} />;
+      }
+
       case 'homeworkCard': {
         const r = d.r as HomeworkResult;
         return <HomeworkCard r={r} onOpen={() => openHomework(r.homeworkId)}
@@ -1065,6 +1130,12 @@ export default function App() {
     // make teaching material is work, not a question, however it is phrased. "Put it on
     // a document" and "make it interactive" are the same request as the one that made
     // it - they used to land on the boundary card.
+    // Before the pack and the planner tests, and deliberately: "a lesson on
+    // fractions" and "slides for tomorrow" used to fall past every branch here
+    // and reach lib/ask.ts, which answered a request to build something as
+    // though it were a question about the school.
+    if (/lesson|presentation|slide|power.?point|\bdeck\b|teach.*(tomorrow|today)/.test(q)
+        && !/evaluat|how did|went/.test(q)) return doLesson();
     if (/homework|home work|\bprep\b|assignment|take.?home/.test(q)) return doHomework();
     if (/worksheet|work sheet|task sheet|differentiat/.test(q)) return doWorksheet();
     if (/upload|photo|picture|image|scan|turn.*(pdf|file|document)|from a (pdf|file|document)/.test(q)) return doPackFromUpload();
@@ -1553,6 +1624,61 @@ export default function App() {
    * open-ended-work boundary. It now takes the same road every other artefact takes:
    * pick a class and a signed-off week, search the bank, then build.
    */
+  // ------------------------------------------------------------------ lesson
+
+  /**
+   * Make a lesson.
+   *
+   * Three steps, and only the last one costs anything: pick the class and the
+   * shape of the lesson, see what it would contain and whether a colleague has
+   * already made it, then build it. The middle step is free - the timing plan is
+   * arithmetic and the bank search is an index lookup - so a teacher finds out
+   * that six objectives will not fit in forty minutes before they pay for a deck
+   * that quietly dropped four of them.
+   */
+  async function doLesson() {
+    const cal = await loadCalendar();
+    if (!cal.classes.length) return say('said', { text: 'You have no classes to plan a lesson for.' });
+    say('lessonPicker', { classes: cal.classes });
+  }
+
+  async function doLessonMatch(ask: LessonAsk) {
+    setBusyPhases(PHASES.match);
+    const r = await fetch('/api/lesson/match', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ask),
+    }).then(r => r.json()).catch(() => ({ error: 'ask_failed' }));
+    setBusy(null);
+
+    if (r.blocked) return say('bound', { text: r.message });
+    if (r.error) return say('bound', { text: r.message ?? friendly(r.error) });
+    say('lessonMatch', { r: r as LessonMatchResult, ask });
+  }
+
+  async function doLessonGenerate(ask: LessonAsk) {
+    setBusyPhases(PHASES.lesson);
+    const r = await fetch('/api/lesson/generate', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ask),
+    }).then(r => r.json()).catch(() => ({ error: 'generate_failed' }));
+    setBusy(null);
+
+    if (r.blocked) return say('bound', { text: r.message });
+    if (r.error) return say('bound', { text: r.message ?? friendly(r.error) });
+    say('lessonCard', { r: r as LessonResult });
+  }
+
+  /** Build the PowerPoint, then hand it over. It is built on demand rather than
+   *  at generation, because most decks are edited before anyone exports one. */
+  async function doLessonExport(lessonId: string, url: string) {
+    setBusy('Building the PowerPoint.');
+    const r = await fetch('/api/lesson/pptx', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lessonId }),
+    }).then(r => r.json()).catch(() => ({ error: 'render_failed' }));
+    setBusy(null);
+    if (r.error) return say('bound', { text: r.message ?? friendly(r.error) });
+    window.location.href = url;
+  }
+
   async function doHomework() {
     const cal = await loadCalendar();
     if (!cal.classes.length) return say('said', { text: 'You have no classes to set homework for.' });
@@ -1699,14 +1825,14 @@ export default function App() {
 
   /** One subject or twenty, in a single request: the queue after an import is
    *  twenty subjects long, and twenty confirmations of the same act is not review. */
-  async function signOff(subjects: { yearGroup: string; subjectId: string }[]) {
+  async function signOff(subjects: { yearGroup: string; subjectId: string; semester: number }[]) {
     if (!subjects.length) return;
     await fetch('/api/review', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action: 'sign_off', subjects }),
     });
     const what = subjects.length === 1
-      ? `${subjects[0].yearGroup} ${subjects[0].subjectId} signed off. Planning is open for it now.`
+      ? `${subjects[0].yearGroup} ${subjects[0].subjectId}, semester ${subjects[0].semester} signed off. Planning is open for it now.`
       : `${subjects.length} subjects signed off. Planning is open for them now.`;
     say('said', { text: what });
     loadAgenda();
@@ -1784,6 +1910,12 @@ export default function App() {
           {/* Everybody has a mailbox, so unlike Administration this is shown to
               everybody. The connection behind it is still per person. */}
           {user && <a className="adminlink" href="/mail">Mail</a>}
+          {/* Correcting the classes you picked at first sign-in, or picking up a cover
+              class in October. Not shown to the roles that see every class anyway -
+              /welcome sends them straight back here. */}
+          {user && !ALL_CLASSES_ROLES.includes(user.role) && (
+            <a className="adminlink" href="/welcome">My classes</a>
+          )}
           {/* The one way in. /admin answers notFound() to everybody else, so this is
               shown to the roles that can actually open it and to nobody else. */}
           {user && ADMIN_ROLES.includes(user.role) && (
@@ -2102,25 +2234,26 @@ function ObjectiveList({ objectives, refs }: { objectives?: Objective[]; refs?: 
  */
 function RegistryTurn({ r, onSignOff }: {
   r: Record<string, unknown>;
-  onSignOff: (subjects: { yearGroup: string; subjectId: string }[]) => void;
+  onSignOff: (subjects: { yearGroup: string; subjectId: string; semester: number }[]) => void;
 }) {
   const gaps: Gap[] = (r.gaps as Gap[]) ?? [];
   const conflicts = gaps.filter(g => g.kind === 'conflict');
   const unreadable = gaps.filter(g => g.kind === 'unreadable');
   const unplaced = gaps.filter(g => g.kind === 'unclassified');
-  const blocked = (r.blocked ?? []) as { year_group: string; subject_id: string; weeks: number; uncoded: number; source: string }[];
+  const blocked = (r.blocked ?? []) as { year_group: string; subject_id: string; semester: number; weeks: number; uncoded: number; source: string }[];
 
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [done, setDone] = useState(false);
 
-  const key = (b: { year_group: string; subject_id: string }) => `${b.year_group}|${b.subject_id}`;
+  const key = (b: { year_group: string; subject_id: string; semester: number }) =>
+    `${b.year_group}|${b.subject_id}|S${b.semester}`;
   const toggle = (k: string) => setPicked(p => {
     const next = new Set(p);
     if (next.has(k)) next.delete(k); else next.add(k);
     return next;
   });
   const all = () => setPicked(picked.size === blocked.length ? new Set() : new Set(blocked.map(key)));
-  const send = (subjects: { yearGroup: string; subjectId: string }[]) => {
+  const send = (subjects: { yearGroup: string; subjectId: string; semester: number }[]) => {
     setDone(true);
     onSignOff(subjects);
   };
@@ -2142,7 +2275,7 @@ function RegistryTurn({ r, onSignOff }: {
           </label>
           <button className="btn primary" disabled={!picked.size || done}
                   onClick={() => send(blocked.filter(b => picked.has(key(b)))
-                    .map(b => ({ yearGroup: b.year_group, subjectId: b.subject_id })))}>
+                    .map(b => ({ yearGroup: b.year_group, subjectId: b.subject_id, semester: b.semester })))}>
             Sign off {picked.size || ''} subject{picked.size === 1 ? '' : 's'}
           </button>
         </div>
@@ -2157,11 +2290,12 @@ function RegistryTurn({ r, onSignOff }: {
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
           <label className="row" style={{ gap: 8, cursor: 'pointer' }}>
             <input type="checkbox" checked={picked.has(key(b))} onChange={() => toggle(key(b))}
-                   aria-label={`Select ${b.year_group} ${b.subject_id}`} />
+                   aria-label={`Select ${b.year_group} ${b.subject_id}, semester ${b.semester}`} />
             <b>{b.year_group} {b.subject_id}</b>
+            <span style={{ color: 'var(--muted)' }}>semester {b.semester}</span>
           </label>
           <button className="btn" disabled={done}
-                  onClick={() => send([{ yearGroup: b.year_group, subjectId: b.subject_id }])}>
+                  onClick={() => send([{ yearGroup: b.year_group, subjectId: b.subject_id, semester: b.semester }])}>
             Sign it off
           </button>
         </div>
@@ -2450,6 +2584,417 @@ function WorksheetPicker({ classes, onPick, asks }: {
  * The generated worksheet, summarised. Objectives come from the registry; the
  * tasks and their three tiers are the model's. Approving delivers the PDF to Drive.
  */
+/**
+ * What a teacher tells us before a lesson is planned.
+ *
+ * Everything past the class and the topic is optional, and that is the design:
+ * a teacher between lessons fills in two fields and presses the button, and a
+ * teacher planning on Sunday fills in six and gets a better lesson. Nothing here
+ * is required that the curriculum can answer for itself - the objectives come
+ * out of the registry when a week is chosen.
+ */
+interface LessonAsk {
+  classId: string;
+  weekNumber?: number | null;
+  semester?: number | null;
+  topic: string;
+  subtopic?: string | null;
+  durationMinutes: number;
+  objectives?: string[];
+  keyQuestion?: string | null;
+  priorKnowledge?: string | null;
+  context?: string | null;
+  approach?: string | null;
+  /** The teacher's own material, already read by /api/ingest/*. */
+  sourceUploadIds?: string[];
+}
+
+/** What a single request can carry to /api/ingest/upload (Vercel's body cap). */
+const LESSON_MAX_UPLOAD_MB = 4;
+/** Below this, pasted text is a sentence, not material - the ingest route's own floor. */
+const LESSON_MIN_PASTE = 120;
+
+/** The periods this school actually runs, and the one it runs most. */
+const LESSON_DURATIONS = [30, 40, 60, 80, 90];
+
+const LESSON_APPROACHES = [
+  'A balance of teaching and practice',
+  'Direct teaching of something new',
+  'Discovery and enquiry',
+  'Mostly practice of something taught',
+  'Discussion and talk',
+  'Revision of work already covered',
+  'A practical or an investigation',
+];
+
+function LessonPicker({ classes: every, onPick }: {
+  classes: ClassCal[];
+  onPick: (ask: LessonAsk) => void;
+}) {
+  // Your own classes first, and only those until you ask for the rest. A head of
+  // department sees every class in the school; the lesson they are planning is
+  // almost always for one of their own, and the rest are there for covering.
+  const own = every.filter(c => c.mine);
+  const [everyClass, setEveryClass] = useState(!own.length);
+  const classes = everyClass ? [...own, ...every.filter(c => !c.mine)] : own;
+  const [chosen, setChosen] = useState(classes[0]?.id ?? '');
+  const k = classes.find(c => c.id === chosen) ?? classes[0];
+  const weeks = k
+    ? [...k.weeks].sort((a, b) => a.weekCommencing.localeCompare(b.weekCommencing))
+    : [];
+
+  const [week, setWeek] = useState<ClassWeek | null>(null);
+  const [topic, setTopic] = useState('');
+  const [subtopic, setSubtopic] = useState('');
+  const [duration, setDuration] = useState(60);
+  const [approach, setApproach] = useState(LESSON_APPROACHES[0]);
+  const [keyQuestion, setKeyQuestion] = useState('');
+  const [prior, setPrior] = useState('');
+  const [context, setContext] = useState('');
+  const [objectives, setObjectives] = useState('');
+  const [more, setMore] = useState(false);
+  // The teacher's own material. Read on the way to the preview, not before: a
+  // teacher who attaches the wrong file and changes it has cost nothing.
+  const [files, setFiles] = useState<File[]>([]);
+  const [pasted, setPasted] = useState('');
+  const [reading, setReading] = useState(false);
+  const [readErr, setReadErr] = useState('');
+
+  if (!k) return null;
+  const klass = k;
+
+  const tooBig = files.reduce((n, f) => n + f.size, 0) > LESSON_MAX_UPLOAD_MB * 1024 * 1024;
+
+  /** Hand the files and the pasted text to the existing ingest routes, which
+   *  extract the text and store it. Nothing about a lesson is special here. */
+  async function readSources(): Promise<string[] | null> {
+    const ids: string[] = [];
+    if (files.length) {
+      const form = new FormData();
+      for (const f of files) form.append('file', f);
+      form.append('subjectId', klass.subject_id);
+      form.append('yearGroup', klass.year_group);
+      const r = await fetch('/api/ingest/upload', { method: 'POST', body: form });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.uploadId) { setReadErr(j.error ?? 'Those files could not be read.'); return null; }
+      ids.push(j.uploadId);
+    }
+    if (pasted.trim().length >= LESSON_MIN_PASTE) {
+      const r = await fetch('/api/ingest/text', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: pasted, subjectId: klass.subject_id,
+                               yearGroup: klass.year_group, title: 'Pasted notes' }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.uploadId) { setReadErr(j.error ?? 'Those notes could not be read.'); return null; }
+      ids.push(j.uploadId);
+    }
+    return ids;
+  }
+
+  // A week carries its own topic, so choosing one fills the box. A teacher who
+  // types over it is telling us something the registry does not know.
+  function pickWeek(w: ClassWeek | null) {
+    setWeek(w);
+    if (w && !topic.trim()) setTopic(w.topic ?? '');
+  }
+
+  const ready = !!topic.trim();
+
+  return (
+    <>
+      <p className="said">Which class, and what is the lesson about?</p>
+
+      <div className="row" style={{ marginTop: 10, gap: 7, flexWrap: 'wrap',
+                                    maxHeight: everyClass ? 180 : undefined, overflow: 'auto' }}>
+        {classes.map(c => (
+          <button key={c.id} className={`chip ${c.id === k.id ? 'key' : ''}`}
+                  onClick={() => { setChosen(c.id); setWeek(null); }}>
+            {c.name}
+          </button>
+        ))}
+      </div>
+      {!!own.length && own.length < every.length && (
+        <button className="chip" style={{ marginTop: 7 }}
+                onClick={() => setEveryClass(v => !v)}>
+          {everyClass ? 'Only my classes' : `Another class (covering) - ${every.length - own.length} more`}
+        </button>
+      )}
+
+      {!!weeks.length && (
+        <>
+          <p className="lfieldlabel" style={{ marginTop: 14 }}>
+            A curriculum week, if this lesson sits in one
+          </p>
+          <div className="row" style={{ marginTop: 6, gap: 6, flexWrap: 'wrap' }}>
+            <button className={`chip ${week ? '' : 'key'}`} onClick={() => pickWeek(null)}>
+              Not a set week
+            </button>
+            {weeks.map(w => (
+              <button key={`${w.semester}-${w.weekNumber}`}
+                      className={`chip ${week?.weekNumber === w.weekNumber && week?.semester === w.semester ? 'key' : ''}`}
+                      onClick={() => pickWeek(w)}
+                      title={w.signedOff
+                        ? (w.topic ?? undefined)
+                        : `${w.topic ?? 'No topic yet'} (not signed off yet)`}>
+                Week {w.weekNumber}{w.signedOff ? '' : ' *'}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      <p className="lfieldlabel" style={{ marginTop: 14 }}>The topic</p>
+      <input className="lnum" style={{ width: '100%', marginTop: 5 }} value={topic}
+             onChange={e => setTopic(e.target.value)}
+             placeholder="Adding two-digit numbers" />
+
+      <p className="lfieldlabel" style={{ marginTop: 12 }}>How long is the lesson?</p>
+      <div className="row" style={{ marginTop: 6, gap: 6 }}>
+        {LESSON_DURATIONS.map(d => (
+          <button key={d} className={`chip ${d === duration ? 'key' : ''}`} onClick={() => setDuration(d)}>
+            {d} min
+          </button>
+        ))}
+      </div>
+
+      <p className="lfieldlabel" style={{ marginTop: 12 }}>How do you want to teach it?</p>
+      <div className="row" style={{ marginTop: 6, gap: 6, flexWrap: 'wrap' }}>
+        {LESSON_APPROACHES.map(a => (
+          <button key={a} className={`chip ${a === approach ? 'key' : ''}`} onClick={() => setApproach(a)}>
+            {a}
+          </button>
+        ))}
+      </div>
+
+      {!more ? (
+        <button className="chip" style={{ marginTop: 12 }} onClick={() => setMore(true)}>
+          Tell me more about this class
+        </button>
+      ) : (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 9 }}>
+          <div>
+            <p className="lfieldlabel">A narrower part of the topic, if there is one</p>
+            <input className="lnum" style={{ width: '100%', marginTop: 4 }} value={subtopic}
+                   onChange={e => setSubtopic(e.target.value)} placeholder="Bridging through ten" />
+          </div>
+          <div>
+            <p className="lfieldlabel">The question the lesson answers</p>
+            <input className="lnum" style={{ width: '100%', marginTop: 4 }} value={keyQuestion}
+                   onChange={e => setKeyQuestion(e.target.value)}
+                   placeholder="What do we do when the ones add up to more than ten?" />
+          </div>
+          <div>
+            <p className="lfieldlabel">What they already know</p>
+            <input className="lnum" style={{ width: '100%', marginTop: 4 }} value={prior}
+                   onChange={e => setPrior(e.target.value)}
+                   placeholder="They can add within twenty" />
+          </div>
+          <div>
+            <p className="lfieldlabel">Anything about the room or the class</p>
+            <input className="lnum" style={{ width: '100%', marginTop: 4 }} value={context}
+                   onChange={e => setContext(e.target.value)}
+                   placeholder="Thirty-four of them, one chalkboard, no tablets" />
+          </div>
+          <div>
+            <p className="lfieldlabel">Your own notes, a worksheet, or a page of the textbook</p>
+            <input type="file" multiple accept=".pdf,.docx,image/png,image/jpeg,image/webp"
+                   aria-label="Attach your own material"
+                   style={{ marginTop: 4, fontSize: 13 }}
+                   onChange={e => { setFiles(Array.from(e.target.files ?? [])); setReadErr(''); }} />
+            {!!files.length && (
+              <p style={{ fontSize: 12, color: tooBig ? 'var(--bad)' : 'var(--muted)', marginTop: 4 }}>
+                {files.map(f => f.name).join(', ')}
+                {tooBig ? ` - more than ${LESSON_MAX_UPLOAD_MB} MB together; send fewer at once.` : ''}
+              </p>
+            )}
+          </div>
+          <div>
+            <p className="lfieldlabel">Or paste notes here</p>
+            <textarea className="paste" style={{ marginTop: 4, minHeight: 70 }} value={pasted}
+                      aria-label="Paste your own notes"
+                      onChange={e => { setPasted(e.target.value); setReadErr(''); }}
+                      placeholder="Anything you want the lesson built around. It is read before the slides are planned." />
+            {!!pasted.trim() && pasted.trim().length < LESSON_MIN_PASTE && (
+              <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+                A little more than that, or put it in the key question instead.
+              </p>
+            )}
+          </div>
+          <div>
+            <p className="lfieldlabel">
+              Your own objectives, one per line - only if the week above does not have them
+            </p>
+            <textarea className="paste" style={{ marginTop: 4, minHeight: 70 }} value={objectives}
+                      onChange={e => setObjectives(e.target.value)} />
+          </div>
+        </div>
+      )}
+
+      {readErr && <p style={{ fontSize: 13, color: 'var(--bad)', marginTop: 10 }}>{readErr}</p>}
+
+      <div className="row" style={{ marginTop: 14 }}>
+        <button
+          className="btn primary"
+          disabled={!ready || reading || tooBig}
+          onClick={async () => {
+            setReading(true); setReadErr('');
+            const sourceUploadIds = await readSources().finally(() => setReading(false));
+            if (sourceUploadIds === null) return;
+            onPick({
+            sourceUploadIds,
+            classId: k.id,
+            weekNumber: week?.weekNumber ?? null,
+            semester: week?.semester ?? null,
+            topic: topic.trim(),
+            subtopic: subtopic.trim() || null,
+            durationMinutes: duration,
+            approach,
+            keyQuestion: keyQuestion.trim() || null,
+            priorKnowledge: prior.trim() || null,
+            context: context.trim() || null,
+            objectives: objectives.split('\n').map(o => o.trim()).filter(Boolean),
+            });
+          }}
+        >
+          {reading ? 'Reading your notes\u2026' : 'See what this would be'}
+        </button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * What the lesson would contain, before it is written.
+ *
+ * Free to produce - the timing is arithmetic and the bank search is an index
+ * lookup - and it is where the honest conversation happens: this is how the
+ * period divides up, these are the objectives it can carry, these are the ones
+ * it cannot, and here is the one your colleague already had approved.
+ */
+function LessonMatchCard({ r, onBuild, onOpen }: {
+  r: LessonMatchResult; ask: LessonAsk;
+  onBuild: () => void;
+  onOpen: (lessonId: string) => void;
+}) {
+  const best = r.matches[0];
+  return (
+    <div className="card">
+      <div className="eyebrow">
+        {r.who.yearGroup} {r.who.subjectName}
+        {r.who.className ? ` · ${r.who.className}` : ''} · {r.durationMinutes} minutes
+      </div>
+      <h3 style={{ marginTop: 4 }}>{r.topic}{r.subtopic ? ` — ${r.subtopic}` : ''}</h3>
+
+      <p className="said" style={{ marginTop: 8 }}>
+        {r.plan.slides} slides, of which at least {r.plan.minStudentSlides} give the class
+        something to do. Pitched for {r.who.ageBand.toLowerCase()}, as a {r.who.subjectProfile.toLowerCase()} lesson.
+      </p>
+
+      <ul className="points" style={{ marginTop: 8 }}>
+        {r.plan.phases.map(p => (
+          <li key={p.label}><b>{p.minutes} min</b> {p.label.toLowerCase()}</li>
+        ))}
+      </ul>
+
+      {!!r.objectives.length && (
+        <>
+          <div className="eyebrow" style={{ marginTop: 12 }}>It will teach</div>
+          <ul className="points">
+            {r.objectives.map((o, i) => (
+              <li key={i}>{o.ref ? <b>{o.ref} </b> : null}{o.text}</li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {!!r.deferred.length && (
+        <>
+          <div className="eyebrow" style={{ marginTop: 12 }}>
+            Not in {r.durationMinutes} minutes
+          </div>
+          <ul className="points">
+            {r.deferred.map((o, i) => (
+              <li key={i}>{o.ref ? <b>{o.ref} </b> : null}{o.text}</li>
+            ))}
+          </ul>
+          <p className="said" style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
+            Ask for a longer lesson, or teach these next time.
+          </p>
+        </>
+      )}
+
+      {best && (
+        <div className="bound" style={{ marginTop: 12 }}>
+          <div className="eyebrow" style={{ marginBottom: 5 }}>Already in the shared bank</div>
+          <p style={{ fontSize: 14 }}>
+            <b>{best.title}</b>{best.author ? ` — ${best.author}` : ''}. {best.why}.
+          </p>
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn" onClick={() => onOpen(best.id)}>Open theirs</button>
+          </div>
+        </div>
+      )}
+
+      <div className="row" style={{ marginTop: 13 }}>
+        <button className="btn primary" onClick={onBuild}>
+          {best ? 'Write me my own anyway' : 'Write this lesson'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** The lesson, once it exists. */
+function LessonCard({ r, onEdit, onExport }: {
+  r: LessonResult; onEdit: () => void; onExport: () => void;
+}) {
+  const problems = r.gate.checks.filter(c => c.status !== 'pass');
+  return (
+    <div className="card">
+      <div className="eyebrow">
+        {r.slides} slides · {r.minutes} of {r.duration} minutes · {r.calls} model calls
+      </div>
+      <h3 style={{ marginTop: 4 }}>{r.title}</h3>
+      {r.subtitle && <p className="said" style={{ color: 'var(--muted)' }}>{r.subtitle}</p>}
+
+      <ul className="points" style={{ marginTop: 9 }}>
+        <li><b>{r.studentSlides}</b> slides where the class works</li>
+        <li><b>{r.visualSlides}</b> slides that show rather than tell</li>
+        <li><b>{r.questions}</b> questions checking understanding, with answers for you</li>
+        {!!r.refs.length && <li><b>{r.refs.length}</b> curriculum objectives, read from the registry</li>}
+      </ul>
+
+      {r.repaired > 0 && (
+        <p className="said" style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
+          {r.repaired} slide{r.repaired === 1 ? ' was' : 's were'} rewritten before you saw
+          {r.repaired === 1 ? ' it' : ' them'}, to meet the quality check.
+        </p>
+      )}
+
+      <div className="eyebrow" style={{ marginTop: 12 }}>
+        The quality check: {r.gate.passed} passed
+        {r.gate.warnings ? `, ${r.gate.warnings} to look at` : ''}
+        {r.gate.blocking ? `, ${r.gate.blocking} blocking` : ''}
+      </div>
+      {!problems.length ? (
+        <p className="said" style={{ fontSize: 13, color: 'var(--muted)' }}>Everything passed.</p>
+      ) : (
+        <ul className="points">
+          {problems.slice(0, 4).map(c => (
+            <li key={c.id}><b>{c.title}.</b> {c.detail}</li>
+          ))}
+        </ul>
+      )}
+
+      <div className="row" style={{ marginTop: 13, gap: 8 }}>
+        <button className="btn primary" onClick={onEdit}>Open the editor</button>
+        <button className="btn" onClick={onExport}>Download the PowerPoint</button>
+      </div>
+    </div>
+  );
+}
+
 function HomeworkCard({ r, onOpen, onApprove }: {
   r: HomeworkResult; onOpen: () => void; onApprove: () => void;
 }) {
@@ -2940,6 +3485,10 @@ const TASKS: { id: string; label: string; note: string; roles: string[] }[] = [
   { id: 'plan', label: 'Plan a week', note: 'Any class, any signed-off week', roles: ['teacher'] },
   { id: 'worksheet', label: 'Make a worksheet', note: 'Support, core and extension of every task', roles: ['teacher'] },
   { id: 'homework', label: 'Set homework', note: 'A timed paper with an answer key', roles: ['teacher'] },
+  // Everyone who teaches, not only the `teacher` role: a head of department or a
+  // coordinator still stands in front of a class, and the first run of this found
+  // an HOD with three classes of their own and no way to make a lesson for them.
+  { id: 'lesson', label: 'Make a lesson', note: 'Slides, activities and a teaching guide', roles: ['teacher', 'lead_teacher', 'hod', 'coordinator'] },
   { id: 'pack', label: 'Make a study pack', note: 'A span of weeks, to revise from', roles: ['teacher'] },
   { id: 'evaluate', label: 'Evaluate lessons taught', note: 'About thirty seconds each', roles: ['teacher'] },
   { id: 'upload', label: 'Build from a file', note: 'A photo or a document you already have', roles: ['teacher'] },

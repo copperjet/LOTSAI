@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { admin, currentUser } from '@/lib/supabase';
+import { classesFor } from '@/lib/classes';
 
 export const runtime = 'nodejs';
 
@@ -22,10 +23,18 @@ export async function GET() {
     .select('id, week_number, week_commencing, week_type, semester')
     .eq('academic_year', '2026-27').order('week_commencing');
 
-  const { data: classes } = await db.from('klass')
-    .select('id, name, subject_id, year_group').eq('teacher_id', user.id).order('name');
+  const classes = await classesFor(db, user);
 
   const classIds = (classes ?? []).map(k => k.id);
+
+  // Which of these the user actually teaches. For a teacher that is all of them;
+  // for a head of department, who can see every class in the school, it is the
+  // three or four among two hundred that are theirs - and a picker that lists
+  // them alphabetically among the rest makes them hard to find. Additive: a
+  // caller that does not read `mine` sees the response it always did.
+  const { data: taught } = await db.from('class_teacher')
+    .select('class_id').eq('user_id', user.id);
+  const mine = new Set((taught ?? []).map(t => t.class_id as string));
   const { data: planners } = classIds.length
     ? await db.from('planner').select('id, class_id, school_week, status').in('class_id', classIds)
     : { data: [] };
@@ -60,6 +69,7 @@ export async function GET() {
     weeks: weeks ?? [],
     classes: (classes ?? []).map(k => ({
       ...k,
+      mine: mine.has(k.id),
       weeks: (weeks ?? []).filter(w => w.week_type === 'teaching').map(w => ({
         weekNumber: w.week_number,
         semester: w.semester,

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { admin, currentUser, NOT_SIGNED_IN } from '@/lib/supabase';
 import { evaluationWindowStart } from '@/lib/evaluation';
+import { classIdsFor } from '@/lib/classes';
 
 export const runtime = 'nodejs';
 
@@ -53,8 +54,12 @@ export async function GET() {
   const tasks: TodayTask[] = [];
 
   if (user.role === 'teacher') {
-    const { data: classes } = await db.from('klass')
-      .select('*, subject:subject_id(name)').eq('teacher_id', user.id);
+    // Allocation lives in class_teacher since 0026, so the ids come from there and
+    // the row this branch actually wants - with the subject name on it - is read by id.
+    const myClassIds = await classIdsFor(db, user);
+    const { data: classes } = myClassIds?.length
+      ? await db.from('klass').select('*, subject:subject_id(name)').in('id', myClassIds)
+      : { data: [] as { id: string }[] };
 
     // Lessons already taught with no note against them, within the window that is
     // still worth writing one for (lib/evaluation.ts). Unbounded, this was a term of

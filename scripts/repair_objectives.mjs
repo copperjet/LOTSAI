@@ -31,15 +31,31 @@ const idByName = new Map((subjects ?? []).map(s => [s.name, s.id]));
 
 const parsed = JSON.parse(readFileSync('supabase/seed/curriculum.json', 'utf8'));
 
-// Same shape the seed builds: semester 1, known subjects, weeks 1-15, and the two
-// parallel units an overview can run in one week merged into that one week.
+// A week the calendar does not hold is not a week, whatever an overview numbered it -
+// the same rule, from the same file, as scripts/load_curriculum.mjs.
+const calendar = JSON.parse(readFileSync('supabase/seed/calendar.json', 'utf8'));
+const lastWeek = {};
+for (const w of calendar.weeks) lastWeek[w.semester] = Math.max(lastWeek[w.semester] ?? 0, w.week);
+
+// Every week the loader would build: both semesters, every known subject, capped
+// only by what the calendar holds, and the two parallel units an overview can run in
+// one week merged into that one week.
+//
+// This used to mirror scripts/seed.mjs instead - semester 1, weeks 1-15 - because the
+// seed was the only thing that had ever written a registry. scripts/load_curriculum.mjs
+// writes both semesters, so that filter now silently declines to repair the half of the
+// year it does not cover, and the key below silently matched a semester-2 week against
+// semester 1's parse of the same week number. Week numbers restart each semester, so
+// that is a wrong repair rather than a missing one.
 const merged = new Map();
 for (const r of parsed) {
   const subject_id = idByName.get(r.subject);
-  if (r.semester !== 1 || !subject_id || r.week > 15) continue;
-  const key = `${r.year_group}|${subject_id}|${r.week}`;
+  if (!subject_id) continue;
+  const semester = r.semester === 2 ? 2 : 1;
+  if (r.week > (lastWeek[semester] ?? 0)) continue;
+  const key = `${r.year_group}|${subject_id}|S${semester}|${r.week}`;
   const seen = merged.get(key);
-  if (!seen) { merged.set(key, { subject_id, year_group: r.year_group, week_number: r.week, objectives: [...r.objectives], source_file: r.source_file }); continue; }
+  if (!seen) { merged.set(key, { subject_id, year_group: r.year_group, semester, week_number: r.week, objectives: [...r.objectives], source_file: r.source_file }); continue; }
   if (seen.source_file !== r.source_file) continue;  // a conflict the seed reports; leave it alone
   for (const o of r.objectives) {
     if (!seen.objectives.some(x => `${x.ref ?? ''}|${x.text}` === `${o.ref ?? ''}|${o.text}`)) seen.objectives.push(o);
@@ -54,7 +70,7 @@ if (error) throw error;
 const changed = [];
 let unmatched = 0;
 for (const row of rows) {
-  const fresh = merged.get(`${row.year_group}|${row.subject_id}|${row.week_number}`);
+  const fresh = merged.get(`${row.year_group}|${row.subject_id}|S${row.semester}|${row.week_number}`);
   if (!fresh) { unmatched++; continue; }
   const before = row.objectives ?? [];
   const same = before.length === fresh.objectives.length

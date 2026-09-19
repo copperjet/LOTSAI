@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser } from '@/lib/supabase';
+import { classesFor } from '@/lib/classes';
 
 export const runtime = 'nodejs';
 
@@ -32,12 +33,10 @@ export async function GET(req: NextRequest) {
   const hit = (s: unknown) => typeof s === 'string' && s.toLowerCase().includes(q);
 
   // ---- your planners -------------------------------------------------------
-  // A teacher searches their own classes; an HOD searches the department's,
-  // because reviewing everybody's work is the job.
-  const klass = db.from('klass').select('id, name, subject_id, year_group');
-  const { data: classes } = user.role === 'hod'
-    ? await klass
-    : await klass.eq('teacher_id', user.id);
+  // A teacher searches their own classes; anybody whose role sees across the school
+  // searches all of them, because reviewing everybody's work is the job. This used to
+  // test for 'hod' alone and so gave a coordinator or a principal a teacher's search.
+  const classes = await classesFor(db, user);
 
   const classIds = (classes ?? []).map(k => k.id);
   const { data: planners } = classIds.length

@@ -56,6 +56,8 @@ import { admin } from './supabase';
 import { call } from './llm';
 import { ROLE_SAYS } from './admin';
 import { normaliseTopic } from './knowledge';
+import { objectivesBlock, resolveSlices, type Slice } from './objectives';
+import { classesFor, teachersByClass } from './classes';
 
 /**
  * What the school's own facts are allowed to cost.
@@ -167,7 +169,15 @@ objective asks for, in its own words from the records, and put the code after it
 if it helps them find it on a Cambridge overview - never a code on its own, and never a list of
 codes as though it answered anything. "Week 1 covers reading a range of fiction genres (4Ri.02)
 and enjoying independent reading (4Ra.01)" is the answer; "Week 1 is 4Ri.02 and 4Ra.01" is the
-question asked again.`;
+question asked again.
+
+The objectives come in the CURRICULUM OBJECTIVES block, which holds only the year groups and
+subjects this particular question is about. The CURRICULUM REGISTRY in the school's records is
+a different thing: it is one line per week naming the topic, for every year group in the school,
+and a topic label is not an objective. So if the question needs objectives and no CURRICULUM
+OBJECTIVES block is present, the records have not been asked for them - say which year group and
+subject you would need rather than reading the objectives off the topic labels, which do not
+contain them. Never turn a topic label into an objective by rewording it.`;
 
 const SCHEMA = {
   type: 'object',
@@ -202,10 +212,20 @@ const YEAR = '2026-27';
  * It sits in `cached` so the second teacher to ask a question today pays a tenth
  * of the input price for it - the same breakpoint discipline the planner and the
  * study pack use.
+ *
+ * It returns the registry's vocabulary alongside the text. lib/objectives.ts has to
+ * decide which year groups and subjects a question is about, and the lists it needs
+ * to decide against are the ones assembled here - reading them a second time would
+ * be the same two queries for the same rows.
  */
-async function schoolBlock(db: ReturnType<typeof admin>): Promise<string> {
+async function schoolBlock(db: ReturnType<typeof admin>): Promise<{
+  text: string;
+  years: string[];
+  subjects: { id: string; name: string }[];
+  pairs: Slice[];
+}> {
   const [{ data: weeks }, { data: reg }, { data: subjects }, { data: staff }, { data: facts },
-         { data: classes }, { data: dates }] = await Promise.all([
+         { data: classes }, { data: dates }, teachers] = await Promise.all([
     db.from('school_week').select('week_number, week_commencing, week_type, semester, note')
       .eq('academic_year', YEAR).order('week_commencing'),
     db.from('curriculum_week').select('week_number, year_group, subject_id, topic_label, signed_off_at')
@@ -223,7 +243,7 @@ async function schoolBlock(db: ReturnType<typeof admin>): Promise<string> {
     // Who teaches what. askerBlock lists the asker's OWN classes, which answers
     // "what am I teaching" but not "who teaches CP4 Maths" - a question a teacher
     // asks in order to go and speak to somebody. A school has a handful of classes.
-    db.from('klass').select('name, year_group, subject_id, teacher:teacher_id(full_name)')
+    db.from('klass').select('id, name, year_group, subject_id')
       .order('name'),
     // The dates that are not weeks: examinations, conferences, reports, holidays. They
     // are a page of the school's own calendar and were previously nowhere in the data,
@@ -232,6 +252,10 @@ async function schoolBlock(db: ReturnType<typeof admin>): Promise<string> {
     // an error - the same tolerance every other read on this page has.
     db.from('school_date').select('starts_on, ends_on, kind, label, note')
       .eq('academic_year', YEAR).order('starts_on'),
+    // Allocation moved to class_teacher in 0026, so a class can now name more than
+    // one teacher. Reading the single klass.teacher_id here would have quietly kept
+    // naming the first of them and calling that the answer.
+    teachersByClass(db),
   ]);
 
   const lines: string[] = [`THE SCHOOL'S RECORDS - Lusaka Oaktree School, academic year ${YEAR}`];
@@ -280,12 +304,14 @@ async function schoolBlock(db: ReturnType<typeof admin>): Promise<string> {
   }
 
   lines.push('');
-  lines.push('CLASSES, and who teaches each one. A class with no teacher against it has not been');
-  lines.push('assigned one in these records - say that, rather than naming whoever teaches the');
-  lines.push('subject elsewhere.');
+  lines.push('CLASSES, and who teaches each one. A class can have more than one teacher');
+  lines.push('against it - a subject shared between two, or somebody covering. A class with no');
+  lines.push('teacher has not been assigned one in these records - say that, rather than naming');
+  lines.push('whoever teaches the subject elsewhere.');
   for (const k of classes ?? []) {
-    const teacher = (k.teacher as unknown as { full_name: string } | null)?.full_name;
-    lines.push(`  ${k.name} (${k.year_group} ${k.subject_id}): ${teacher ?? 'no teacher assigned'}`);
+    const names = teachers.get(k.id) ?? [];
+    lines.push(`  ${k.name} (${k.year_group} ${k.subject_id}): `
+      + (names.length ? names.join(', ') : 'no teacher assigned'));
   }
 
   lines.push('');
@@ -331,23 +357,29 @@ async function schoolBlock(db: ReturnType<typeof admin>): Promise<string> {
     }
   }
 
-  return lines.join('\n');
+  return {
+    text: lines.join('\n'),
+    years: [...new Set((reg ?? []).map(r => r.year_group))].sort(),
+    subjects: (subjects ?? []).map(s => ({ id: s.id, name: s.name })),
+    pairs: [...new Map((reg ?? []).map(r =>
+      [`${r.year_group}|${r.subject_id}`, { year_group: r.year_group, subject_id: r.subject_id }],
+    )).values()],
+  };
 }
 
 /** The half that changes per teacher, and so must follow the cache breakpoint. */
 async function askerBlock(
   db: ReturnType<typeof admin>,
   user: { id: string; full_name: string; role: string },
-): Promise<string> {
+): Promise<{ text: string; mine: Slice[] }> {
   const today = new Date().toISOString().slice(0, 10);
   const lines = [`TODAY is ${today}.`, `THE PERSON ASKING is ${user.full_name}, a ${user.role}.`];
 
-  const { data: classes } = await db.from('klass')
-    .select('id, name, subject_id, year_group').eq('teacher_id', user.id).order('name');
+  const classes = await classesFor(db, user);
 
-  if (!classes?.length) {
+  if (!classes.length) {
     lines.push('They teach no classes in this application.');
-    return lines.join('\n');
+    return { text: lines.join('\n'), mine: [] };
   }
 
   lines.push('', 'THEIR CLASSES:');
@@ -369,7 +401,32 @@ async function askerBlock(
     lines.push('', 'THEY HAVE NO PLANNERS yet.');
   }
 
-  return lines.join('\n');
+  return {
+    text: lines.join('\n'),
+    mine: [...new Map(classes.map(k =>
+      [`${k.year_group}|${k.subject_id}`, { year_group: k.year_group, subject_id: k.subject_id }],
+    )).values()],
+  };
+}
+
+/**
+ * Which semester the school is in today.
+ *
+ * The next teaching week at or after today, which is how app/api/agenda/route.ts
+ * already decides what "this week" means: on a Wednesday it is still the week you
+ * are in, and it rolls forward on Monday. Past the last teaching week of the year
+ * there is no next one, and semester 2 is the honest answer then - the year ends in
+ * it. Week numbers restart each semester, so getting this wrong does not fail, it
+ * quietly answers about the wrong half of the year.
+ */
+async function currentSemester(db: ReturnType<typeof admin>): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data } = await db.from('school_week')
+    .select('semester')
+    .eq('academic_year', YEAR).eq('week_type', 'teaching')
+    .gte('week_commencing', today)
+    .order('week_commencing').limit(1).maybeSingle();
+  return data?.semester ?? 2;
 }
 
 export async function askAboutSchool(
@@ -377,18 +434,32 @@ export async function askAboutSchool(
   user: { id: string; full_name: string; role: string },
 ): Promise<Answer & { usage: unknown }> {
   const db = admin();
-  const [school, asker] = await Promise.all([schoolBlock(db), askerBlock(db, user)]);
+  const [school, asker, semester] = await Promise.all([
+    schoolBlock(db), askerBlock(db, user), currentSemester(db),
+  ]);
+
+  // Which year groups and subjects the question is about, and then their objectives.
+  //
+  // This goes after the cache breakpoint, with the asker, rather than into `cached`
+  // with the school block - which is the opposite of what it looks like it wants.
+  // lib/providers/anthropic.ts puts the one breakpoint on the *last* cached block, so
+  // a per-question block appended there would make the whole prefix per-question: the
+  // school block is what the whole school shares, and a French question would evict it
+  // for the CP5 maths teacher who asked a second earlier. The saving forgone is small -
+  // a pair is 700 tokens at the median - and the prefix it would cost is 8,000.
+  const slices = resolveSlices(question, school, asker.mine, school.pairs);
+  const objectives = await objectivesBlock(db, slices, YEAR, semester);
 
   const { data, usage } = await call<Answer>({
     tier: 'small',
     workflow: 'school_question',
     userId: user.id,
     system: SYSTEM,
-    cached: [school],
+    cached: [school.text],
     // The whole school shares this prefix, and questions come in bursts around
     // the planning window, so it earns the long TTL the same way the planner does.
     longCache: true,
-    prompt: `${asker}\n\nTHE QUESTION: ${question}`,
+    prompt: `${asker.text}${objectives}\n\nTHE QUESTION: ${question}`,
     schema: SCHEMA as unknown as Record<string, unknown>,
     maxTokens: 700,
   });

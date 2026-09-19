@@ -13,7 +13,11 @@
     "repair:objectives": "node --env-file=.env.local scripts/repair_objectives.mjs",
     "ingest:sow": "python scripts/ingest_scheme_of_work.py \"../Schemes of Work\" --out supabase/seed",
     "load:curriculum": "node --env-file=.env.local scripts/load_curriculum.mjs",
-    "load:sow": "node --env-file=.env.local scripts/load_scheme_of_work.mjs"
+    "load:sow": "node --env-file=.env.local scripts/load_scheme_of_work.mjs",
+    "ingest:tracker": "python scripts/ingest_tracker.py \"../../LOTS/KPI Trackers/Upload to Drive/LOTS Whole-School Curriculum Coverage Tracker 2026-2027.xlsx\" --out supabase/seed",
+    "load:tracker": "node --env-file=.env.local scripts/load_tracker.mjs",
+    "check:lesson": "tsc -p tsconfig.render-check.json && node --env-file=.env.local -r ./scripts/render_check_alias.cjs .render-check/scripts/render_check_lesson.js",
+    "check:lesson:live": "tsc -p tsconfig.render-check.json && node --env-file=.env.local -r ./scripts/render_check_alias.cjs .render-check/scripts/live_check_lesson.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
@@ -25,6 +29,7 @@
     "openai": "^7.8.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.7.76",
+    "pptxgenjs": "^4.0.1",
     "puppeteer-core": "^25.9.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

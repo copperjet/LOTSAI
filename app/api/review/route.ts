@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { admin, currentUser, audit } from '@/lib/supabase';
+import { REVIEWER_ROLES } from '@/lib/admin';
 
 export const runtime = 'nodejs';
 
@@ -12,13 +13,22 @@ const MAX_AT_ONCE = 100;
  * GET  /api/review?view=bank       the shared bank, ranked
  * GET  /api/review?view=registry   what is still blocking generation
  * GET  /api/review?view=coverage   computed coverage per class
- * POST /api/review  { action: 'sign_off', subjects: [{ yearGroup, subjectId }] }
- *                   { action: 'sign_off', yearGroup, subjectId }   - one, as before
+ * POST /api/review  { action: 'sign_off', subjects: [{ yearGroup, subjectId, semester }] }
+ *                   { action: 'sign_off', yearGroup, subjectId, semester }  - one, as before
  */
 export async function GET(req: NextRequest) {
   const db = admin();
   const user = await currentUser();
   const view = req.nextUrl.searchParams.get('view');
+
+  // The bank is department-wide by design - a teacher reuses from it, which is the
+  // whole point of it. Everything else here is the reviewer's view of other people's
+  // work: the submitted-planner queue with teacher names against it, what the registry
+  // is still blocking, and per-class coverage. Only the POST was ever gated, so any
+  // signed-in teacher could read all three of those by asking for them directly.
+  if (view !== 'bank' && !REVIEWER_ROLES.includes(user.role)) {
+    return NextResponse.json({ error: 'Only a reviewer can read the review queue' }, { status: 403 });
+  }
 
   if (view === 'bank') {
     // Department-wide by default; private artefacts leave the index (B rule 5).
@@ -32,13 +42,16 @@ export async function GET(req: NextRequest) {
 
   if (view === 'registry') {
     const { data } = await db.from('curriculum_week')
-      .select('year_group, subject_id, objectives, source_file, signed_off_at');
+      .select('year_group, subject_id, semester, objectives, source_file, signed_off_at');
 
-    const groups = new Map<string, { year_group: string; subject_id: string; weeks: number; uncoded: number; source: string; signed: boolean }>();
+    // Grouped by semester as well as by subject. A year's overviews are written and
+    // read a semester at a time, and a head of department signing off what they have
+    // read of semester 1 was signing off semester 2 unseen along with it.
+    const groups = new Map<string, { year_group: string; subject_id: string; semester: number; weeks: number; uncoded: number; source: string; signed: boolean }>();
     for (const row of data ?? []) {
-      const key = `${row.year_group}|${row.subject_id}`;
+      const key = `${row.year_group}|${row.subject_id}|${row.semester}`;
       const g = groups.get(key) ?? {
-        year_group: row.year_group, subject_id: row.subject_id,
+        year_group: row.year_group, subject_id: row.subject_id, semester: row.semester,
         weeks: 0, uncoded: 0, source: row.source_file ?? '', signed: true,
       };
       g.weeks++;
@@ -95,24 +108,27 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const db = admin();
   const user = await currentUser();
-  if (!['hod', 'coordinator', 'principal', 'admin'].includes(user.role)) {
+  if (!REVIEWER_ROLES.includes(user.role)) {
     return NextResponse.json({ error: 'Only a reviewer can sign off the curriculum' }, { status: 403 });
   }
 
   const body = await req.json();
-  const { action, yearGroup, subjectId } = body;
+  const { action, yearGroup, subjectId, semester } = body;
   if (action !== 'sign_off') return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
 
   // Twenty subjects waiting is twenty round trips if this only ever takes one, so it
   // takes a list. One subject is the list of one, which is what the older callers send.
-  const asked: { yearGroup: string; subjectId: string }[] =
-    Array.isArray(body.subjects) ? body.subjects : [{ yearGroup, subjectId }];
+  const asked: { yearGroup: string; subjectId: string; semester?: number }[] =
+    Array.isArray(body.subjects) ? body.subjects : [{ yearGroup, subjectId, semester }];
 
+  // A subject arriving without a semester is refused rather than defaulted. Signing
+  // off is a statement about something read, and the semester is which thing was read;
+  // guessing it here is how semester 2 got signed off unseen in the first place.
   const seen = new Set<string>();
   const subjects = asked
-    .filter(s => s && s.yearGroup && s.subjectId)
+    .filter(s => s && s.yearGroup && s.subjectId && (s.semester === 1 || s.semester === 2))
     .filter(s => {
-      const key = `${s.yearGroup}|${s.subjectId}`;
+      const key = `${s.yearGroup}|${s.subjectId}|${s.semester}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -120,7 +136,7 @@ export async function POST(req: NextRequest) {
     .slice(0, MAX_AT_ONCE);
 
   if (!subjects.length) {
-    return NextResponse.json({ error: 'No subject named' }, { status: 400 });
+    return NextResponse.json({ error: 'No subject and semester named' }, { status: 400 });
   }
 
   // Sign-off is what opens generation for a subject (Addendum C section C7).
@@ -131,10 +147,11 @@ export async function POST(req: NextRequest) {
   for (const s of subjects) {
     const { count } = await db.from('curriculum_week')
       .update({ signed_off_by: user.id, signed_off_at: at }, { count: 'exact' })
-      .match({ year_group: s.yearGroup, subject_id: s.subjectId, academic_year: '2026-27' });
+      .match({ year_group: s.yearGroup, subject_id: s.subjectId,
+               semester: s.semester, academic_year: '2026-27' });
     weeks += count ?? 0;
     await audit(user.id, 'registry.sign_off', 'curriculum_week',
-      `${s.yearGroup}/${s.subjectId}`, { weeks: count });
+      `${s.yearGroup}/${s.subjectId}/S${s.semester}`, { weeks: count });
   }
 
   return NextResponse.json({ ok: true, signed: subjects.length, weeks });

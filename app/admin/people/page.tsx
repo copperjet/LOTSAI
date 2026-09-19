@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { fromView, money, count, when, ROLES, ROLE_SAYS, PROBLEM_SAYS } from '@/lib/admin';
+import { fromView, money, count, when, ROLES, ROLE_SAYS, PROBLEM_SAYS, SCHOOL_DOMAIN } from '@/lib/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,7 +60,8 @@ export default async function People({ searchParams }: {
         </label>
         <label className="afield">
           <span>Email</span>
-          <input name="email" type="email" required placeholder="gbanda@lotschool.edu.zm" />
+          <input name="email" type="email" required
+                 placeholder={`grace_banda@${SCHOOL_DOMAIN}`} />
         </label>
         <label className="afield">
           <span>Role</span>
@@ -72,11 +73,19 @@ export default async function People({ searchParams }: {
           <span>Department</span>
           <input name="department" placeholder="Primary" />
         </label>
+        <label className="afield">
+          <span>Outside address</span>
+          <span style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 400 }}>
+            <input name="outside_email" type="checkbox" value="1" />
+            Allow an address that is not @{SCHOOL_DOMAIN}
+          </span>
+        </label>
         <button type="submit">Add them</button>
       </form>
       <p className="anote awide" style={{ marginBottom: 18 }}>
-        They choose their own PIN the first time they sign in, behind the school password. No PIN is
-        set here, and nobody can set one for somebody else.
+        They sign in with this address and choose their own PIN the first time. No PIN is set here,
+        and nobody can set one for somebody else - so type the address carefully, because whoever
+        reaches the sign-in page with it first is who chooses that PIN.
       </p>
 
       <table className="atable">

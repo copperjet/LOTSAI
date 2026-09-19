@@ -31,6 +31,12 @@ export const FORMAT: Record<string, { ext: string; contentType: string }> = {
   worksheet: { ext: 'pdf', contentType: 'application/pdf' },
   homework: { ext: 'html', contentType: 'text/html; charset=utf-8' },
   'homework-pdf': { ext: 'pdf', contentType: 'application/pdf' },
+  lesson: { ext: 'html', contentType: 'text/html; charset=utf-8' },
+  'lesson-pdf': { ext: 'pdf', contentType: 'application/pdf' },
+  'lesson-pptx': {
+    ext: 'pptx',
+    contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  },
 };
 
 export async function storeArtefact(std: Standard, docId: string): Promise<StoreResult> {

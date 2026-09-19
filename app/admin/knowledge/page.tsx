@@ -24,15 +24,22 @@ export default async function KnowledgePage() {
   const YEAR = '2026-27';
   const rows = { count: 'exact' as const, head: true };
 
-  const [weeks, signedWeeks, staff, classes, unassigned, calendar, facts] = await Promise.all([
+  const [weeks, signedWeeks, staff, classes, allocated, calendar, facts] = await Promise.all([
     db.from('curriculum_week').select('*', rows).eq('academic_year', YEAR),
     db.from('curriculum_week').select('*', rows).eq('academic_year', YEAR).not('signed_off_at', 'is', null),
     db.from('app_user').select('*', rows).eq('is_active', true),
     db.from('klass').select('*', rows),
-    db.from('klass').select('*', rows).is('teacher_id', null),
+    // Which classes have somebody against them. Counted from the allocations rather
+    // than from a null column, because since 0026 a class can have two teachers and
+    // "has no teacher" is the absence of a row, not a null in one.
+    db.from('class_teacher').select('class_id'),
     db.from('school_week').select('*', rows).eq('academic_year', YEAR),
     db.from('school_fact').select('*', rows).eq('academic_year', YEAR).is('retired_at', null),
   ]);
+
+  const unassigned = {
+    count: (classes.count ?? 0) - new Set((allocated.data ?? []).map(a => a.class_id)).size,
+  };
 
   const sources = [
     {

@@ -75,6 +75,22 @@ const BUILTIN: Record<string, Workflow> = {
       tier: 'standard', render: { format: 'html' },
     },
   },
+  lesson: {
+    key: 'lesson', name: 'Lesson', roles: ['teacher'],
+    // The duration is in the key because the same objectives taught in forty
+    // minutes and in eighty are two different lessons, and offering one as a
+    // reuse of the other hands a teacher a deck that cannot fit their period.
+    collaborative: { work_key: ['artefact_type', 'subject', 'year_group', 'academic_year', 'school_week', 'objective_set', 'duration'], on_match: ['reuse', 'adapt'] },
+    // A lesson is the teacher's own teaching, as a worksheet is - they approve it.
+    approval: { submit_to: 'teacher', states: ['draft', 'approved', 'returned'] },
+    render: { on: 'create', to: 'storage', format: 'html' },
+    standard: {
+      key: 'lesson', version: 'v1', name: 'Lesson',
+      schema: {}, non_negotiables: [],
+      generator_id: 'lesson', gate_id: 'lesson', renderer_id: 'lesson',
+      tier: 'standard', render: { format: 'html' },
+    },
+  },
   worksheet: {
     key: 'worksheet', name: 'Worksheet', roles: ['teacher'],
     collaborative: { work_key: ['artefact_type', 'subject', 'year_group', 'academic_year', 'school_week', 'objective_set'], on_match: ['reuse', 'adapt'] },

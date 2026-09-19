@@ -7,7 +7,8 @@
  * never build the path themselves.
  */
 export type ArtefactKind =
-  | 'studypack-html' | 'studypack-pdf' | 'worksheet' | 'planner' | 'homework' | 'homework-pdf';
+  | 'studypack-html' | 'studypack-pdf' | 'worksheet' | 'planner' | 'homework' | 'homework-pdf'
+  | 'lesson' | 'lesson-pdf' | 'lesson-pptx';
 
 export function viewUrl(kind: ArtefactKind, id: string): string {
   return `/api/document/view?kind=${kind}&id=${encodeURIComponent(id)}`;

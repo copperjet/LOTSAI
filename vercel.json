@@ -10,6 +10,9 @@
     },
     "app/api/studypack/**/*.ts": {
       "maxDuration": 300
+    },
+    "app/api/lesson/**/*.ts": {
+      "maxDuration": 300
     }
   }
 }

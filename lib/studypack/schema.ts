@@ -19,6 +19,10 @@
  * output demands both. Optional fields are therefore nullable rather than absent.
  */
 
+import {
+  obj, str, nstr, int, nint, num, nnum, arr, lit, type JSchema,
+} from '@/lib/jsonschema';
+
 // ---------------------------------------------------------------- objectives
 
 /**
@@ -246,23 +250,8 @@ export interface PackOutline {
 
 // ------------------------------------------------------------- JSON Schemas
 
-type JSchema = Record<string, unknown>;
-
-/** Strict-mode object: every property required, no extras. */
-function obj(properties: Record<string, JSchema>): JSchema {
-  return {
-    type: 'object', additionalProperties: false,
-    required: Object.keys(properties), properties,
-  };
-}
-const str: JSchema = { type: 'string' };
-const nstr: JSchema = { type: ['string', 'null'] };
-const int: JSchema = { type: 'integer' };
-const nint: JSchema = { type: ['integer', 'null'] };
-const num: JSchema = { type: 'number' };
-const nnum: JSchema = { type: ['number', 'null'] };
-const arr = (items: JSchema): JSchema => ({ type: 'array', items });
-const lit = (v: string): JSchema => ({ type: 'string', enum: [v] });
+/** The strict-mode primitives now live in lib/jsonschema.ts, shared with the
+ *  lesson deck (lib/lesson/schema.ts), which needs them without the pack model. */
 
 /** One schema per block type, keyed so a fill call can be narrowed to the types
  *  the outline actually chose - a smaller union is a more reliable one. */
