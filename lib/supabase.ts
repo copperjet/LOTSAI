@@ -103,3 +103,38 @@ export async function audit(actorId: string, action: string, entityType?: string
     entity_id: entityId ?? null, detail: detail ?? null,
   });
 }
+
+/** How many rows PostgREST returns before it stops, whatever the query asked for. */
+const PAGE = 1000;
+
+/**
+ * Every row a query matches, not the first thousand.
+ *
+ * PostgREST caps a select at 1000 rows and says nothing about it - no error, no flag,
+ * just a shorter array. So a query that reads a whole table is correct until the day
+ * the table passes a thousand rows, and then it is quietly wrong, and the failure
+ * looks like missing data rather than a bug.
+ *
+ * `curriculum_week` passed it the day the coverage tracker was loaded: 1,683 rows,
+ * of which three whole-registry reads were seeing 1,000. The head of department's
+ * sign-off list was missing 683 weeks, and so was the chat's index of what the school
+ * teaches - both of them simply absent, with nothing anywhere saying so.
+ *
+ * Used for reads that are deliberately unfiltered. A query already scoped to one
+ * class, one week or one subject does not need it and should not pay for it.
+ *
+ *   const weeks = await allRows(r => db.from('curriculum_week').select('*').range(...r));
+ */
+export async function allRows<T>(
+  page: (range: [number, number]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await page([from, from + PAGE - 1]);
+    if (error) throw new Error(error.message);
+    if (!data?.length) break;
+    out.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return out;
+}

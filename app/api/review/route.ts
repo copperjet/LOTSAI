@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { admin, currentUser, audit } from '@/lib/supabase';
+import { admin, currentUser, audit, allRows } from '@/lib/supabase';
 import { REVIEWER_ROLES } from '@/lib/admin';
 
 export const runtime = 'nodejs';
@@ -41,14 +41,21 @@ export async function GET(req: NextRequest) {
   }
 
   if (view === 'registry') {
-    const { data } = await db.from('curriculum_week')
-      .select('year_group, subject_id, semester, objectives, source_file, signed_off_at');
+    // Paged: this reads the whole registry, which passed PostgREST's 1000-row cap
+    // when the coverage tracker was loaded. Capped, the list of subjects waiting to
+    // be signed off was simply missing its tail, with nothing to say so.
+    const data = await allRows<{
+      year_group: string; subject_id: string; semester: number;
+      objectives: { ref: string | null }[]; source_file: string | null; signed_off_at: string | null;
+    }>(r => db.from('curriculum_week')
+      .select('year_group, subject_id, semester, objectives, source_file, signed_off_at')
+      .range(...r));
 
     // Grouped by semester as well as by subject. A year's overviews are written and
     // read a semester at a time, and a head of department signing off what they have
     // read of semester 1 was signing off semester 2 unseen along with it.
     const groups = new Map<string, { year_group: string; subject_id: string; semester: number; weeks: number; uncoded: number; source: string; signed: boolean }>();
-    for (const row of data ?? []) {
+    for (const row of data) {
       const key = `${row.year_group}|${row.subject_id}|${row.semester}`;
       const g = groups.get(key) ?? {
         year_group: row.year_group, subject_id: row.subject_id, semester: row.semester,

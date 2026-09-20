@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { admin, currentUser } from '@/lib/supabase';
+import { admin, currentUser, allRows } from '@/lib/supabase';
 import { classesFor } from '@/lib/classes';
 
 export const runtime = 'nodejs';
@@ -59,9 +59,15 @@ export async function GET(req: NextRequest) {
   }
 
   // ---- the registry --------------------------------------------------------
-  const { data: weeks } = await db.from('curriculum_week')
+  // The whole year, in memory - past PostgREST's 1000-row cap since the coverage
+  // tracker was loaded, so paged rather than silently searching the first thousand.
+  const weeks = await allRows<{
+    id: string; year_group: string; subject_id: string; week_number: number;
+    topic_label: string | null; objectives: { ref: string | null; text: string }[];
+    signed_off_at: string | null;
+  }>(r => db.from('curriculum_week')
     .select('id, year_group, subject_id, week_number, topic_label, objectives, signed_off_at')
-    .eq('academic_year', '2026-27').order('week_number');
+    .eq('academic_year', '2026-27').order('week_number').range(...r));
 
   const weekHits: Hit[] = [];
   for (const w of weeks ?? []) {

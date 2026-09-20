@@ -97,12 +97,21 @@ if (calendarError) {
 const notTaught = new Set(calendar.filter(w => w.week_type === 'break')
   .map(w => `S${w.semester}|${w.week_number}`));
 
-const { data: existing, error: registryError } = await db.from('curriculum_week')
-  .select('*')
-  .eq('academic_year', YEAR);
-if (registryError) {
-  console.error(`cannot read the registry: ${registryError.message}`);
-  process.exit(1);
+// Paged. PostgREST stops at 1000 rows and says nothing about it, and this read is
+// what decides whether a week is already held - so capped, it would have called 683
+// weeks it could not see "not in the registry" and overwritten the overview's
+// objectives with the tracker's on the next run.
+const existing = [];
+for (let from = 0; ; from += 1000) {
+  const { data, error } = await db.from('curriculum_week')
+    .select('*').eq('academic_year', YEAR).range(from, from + 999);
+  if (error) {
+    console.error(`cannot read the registry: ${error.message}`);
+    process.exit(1);
+  }
+  if (!data.length) break;
+  existing.push(...data);
+  if (data.length < 1000) break;
 }
 
 const had = new Map(existing.map(r =>

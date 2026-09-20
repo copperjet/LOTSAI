@@ -52,7 +52,7 @@
  * one. The whole set is tens of rows, so it joins the cached prefix like everything
  * else here rather than being retrieved from.
  */
-import { admin } from './supabase';
+import { admin, allRows } from './supabase';
 import { call } from './llm';
 import { ROLE_SAYS } from './admin';
 import { normaliseTopic } from './knowledge';
@@ -224,12 +224,18 @@ async function schoolBlock(db: ReturnType<typeof admin>): Promise<{
   subjects: { id: string; name: string }[];
   pairs: Slice[];
 }> {
-  const [{ data: weeks }, { data: reg }, { data: subjects }, { data: staff }, { data: facts },
+  const [{ data: weeks }, reg, { data: subjects }, { data: staff }, { data: facts },
          { data: classes }, { data: dates }, teachers] = await Promise.all([
     db.from('school_week').select('week_number, week_commencing, week_type, semester, note')
       .eq('academic_year', YEAR).order('week_commencing'),
-    db.from('curriculum_week').select('week_number, year_group, subject_id, topic_label, signed_off_at')
-      .eq('academic_year', YEAR).order('week_number'),
+    // Paged. This is every week the school teaches, and it passed PostgREST's
+    // 1000-row cap when the coverage tracker was loaded - so the index of what the
+    // school covers was missing its tail, and the model had no way to know.
+    allRows<{ week_number: number; year_group: string; subject_id: string;
+              topic_label: string | null; signed_off_at: string | null }>(
+      r => db.from('curriculum_week')
+        .select('week_number, year_group, subject_id, topic_label, signed_off_at')
+        .eq('academic_year', YEAR).order('week_number').range(...r)),
     db.from('subject').select('id, name, department'),
     // Name, role and department only. `app_user` also carries email, last_seen_at,
     // pin_set_at and locked_until; those are administration data for /admin/people,
@@ -317,7 +323,7 @@ async function schoolBlock(db: ReturnType<typeof admin>): Promise<{
   lines.push('');
   lines.push('CURRICULUM REGISTRY. What each year group covers in each week, and whether the head of');
   lines.push('department has signed it off. Only a signed-off week can be planned or built from.');
-  for (const r of reg ?? []) {
+  for (const r of reg) {
     lines.push(`  ${r.year_group} ${r.subject_id} week ${r.week_number}: ${r.topic_label ?? '(no topic recorded)'}`
       + `${r.signed_off_at ? '' : ' [not signed off]'}`);
   }
@@ -359,9 +365,9 @@ async function schoolBlock(db: ReturnType<typeof admin>): Promise<{
 
   return {
     text: lines.join('\n'),
-    years: [...new Set((reg ?? []).map(r => r.year_group))].sort(),
+    years: [...new Set(reg.map(r => r.year_group))].sort(),
     subjects: (subjects ?? []).map(s => ({ id: s.id, name: s.name })),
-    pairs: [...new Map((reg ?? []).map(r =>
+    pairs: [...new Map(reg.map(r =>
       [`${r.year_group}|${r.subject_id}`, { year_group: r.year_group, subject_id: r.subject_id }],
     )).values()],
   };

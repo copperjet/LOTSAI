@@ -62,10 +62,19 @@ for (const r of parsed) {
   }
 }
 
-const { data: rows, error } = await db.from('curriculum_week')
-  .select('id,year_group,subject_id,semester,week_number,objectives')
-  .eq('academic_year', YEAR);
-if (error) throw error;
+// Paged, because PostgREST stops at 1000 rows without saying so and the registry
+// passed that when the coverage tracker was loaded. Capped, this repaired whichever
+// thousand came back first and reported the rest as having nothing to compare.
+const rows = [];
+for (let from = 0; ; from += 1000) {
+  const { data, error } = await db.from('curriculum_week')
+    .select('id,year_group,subject_id,semester,week_number,objectives')
+    .eq('academic_year', YEAR).range(from, from + 999);
+  if (error) throw error;
+  if (!data.length) break;
+  rows.push(...data);
+  if (data.length < 1000) break;
+}
 
 const changed = [];
 let unmatched = 0;
