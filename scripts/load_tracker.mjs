@@ -13,11 +13,12 @@
  *   - a row that already holds objectives                            -> leave it
  *   - any week the calendar calls a break                            -> skip it
  *
- * A week both sources hold, with objectives that differ, is recorded in
- * `registry_gap` as a conflict for the head of department to decide in
- * /admin/curriculum - the same place the overviews' own duplicate files land.
- * Choosing a winner here would be exactly the confident wrongness the sign-off gate
- * exists to catch, and the tracker is only 66% filled in its best term.
+ * A week both sources hold, with objectives that differ, is written to
+ * supabase/seed/tracker_conflicts.json with both sets side by side, and nothing is
+ * written to the registry for it. Choosing a winner here would be exactly the
+ * confident wrongness the sign-off gate exists to catch, and the tracker is only
+ * 66% filled in its best term. See `queueConflicts` below for why the report is a
+ * file rather than the head of department's worklist.
  *
  * Nothing is signed off, by this or by anything else that is not a person. Weeks
  * written here carry ref_source = 'hod', because a teacher wrote them into the
@@ -26,7 +27,7 @@
  *
  * Dry run unless --write, and it prints what it would do either way.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
 
 const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
@@ -36,6 +37,27 @@ const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABA
 const args = process.argv.slice(2);
 const write = args.includes('--write');
 const file = args.find(a => !a.startsWith('--')) ?? 'supabase/seed/tracker_curriculum.json';
+
+/**
+ * Where a disagreement between the two documents goes.
+ *
+ * Not into `registry_gap` by default, which is what this used to do. That table is
+ * the head of department's worklist and /admin/curriculum offers a decision against
+ * every row in it - but a decision recorded there is read by nothing. The only code
+ * that reads a conflict decision is scripts/ingest_overviews.py, through a
+ * `conflict_resolutions.json` that nothing writes and that does not exist, and that
+ * mechanism is file-level in any case: which of two overview documents is current,
+ * not which of two documents is right about week 6. So 341 rows would have arrived
+ * in the worklist offering a button that does nothing, burying the ten real
+ * file-level conflicts that do have a resolution path.
+ *
+ * They go to a report instead. The information is worth having - it is every week
+ * the school has described twice and differently - and a file can be read without
+ * promising an action that is not implemented. `--conflicts` puts them in the queue
+ * as well, for whoever builds that resolution loop.
+ */
+const queueConflicts = args.includes('--conflicts');
+const REPORT = 'supabase/seed/tracker_conflicts.json';
 
 const rows = JSON.parse(readFileSync(file, 'utf8'));
 if (!rows.length) {
@@ -86,6 +108,15 @@ if (registryError) {
 const had = new Map(existing.map(r =>
   [`${r.year_group}|${r.subject_id}|S${r.semester}|${r.week_number}`, r]));
 
+/** A week's objectives as one comparable run of text: refs kept, everything that
+ *  differs between a PDF and a spreadsheet cell thrown away. */
+const flatten = objs => objs
+  .map(o => `${o.ref ?? ''} ${o.text}`)
+  .join(' ')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim();
+
 const insert = [], fill = [], conflicts = [];
 const skipped = { unknownSubject: new Map(), alreadyHeld: 0, notTaught: 0 };
 
@@ -118,23 +149,25 @@ for (const w of rows) {
   if (!held.length) { fill.push({ id: seen.id, row }); continue; }
 
   // Both hold objectives. Identical is not a disagreement, so it is not reported as
-  // one; the tracker is often the overview typed up, and a queue full of weeks that
-  // agree is a queue nobody reads.
-  const same = held.length === w.objectives.length
-    && held.every((o, i) => o.text === w.objectives[i].text
-      && (o.ref ?? null) === (w.objectives[i].ref ?? null));
-  if (same) { skipped.alreadyHeld++; continue; }
+  // one; the tracker is often the overview typed up, and a report full of weeks that
+  // agree is a report nobody reads.
+  //
+  // Compared as one run of text rather than item by item. The two documents break
+  // the same objectives in different places - the overview puts the strand on its own
+  // line and the tracker runs it into the sentence, so "Experiencing" + "E.01
+  // Encounter, sense, experiment with..." meets "Experiencing E.01 Encounter, sense,
+  // experiment with..." - and item-by-item called every one of those a disagreement.
+  // Punctuation and case go too, because they differ between a PDF and a spreadsheet
+  // cell for reasons that have nothing to do with what is taught.
+  if (flatten(held) === flatten(w.objectives)) { skipped.alreadyHeld++; continue; }
 
   conflicts.push({
-    academic_year: YEAR,
-    kind: 'conflict',
     year_group: w.year_group,
-    subject: w.subject_id,
+    subject_id: w.subject_id,
     semester: w.semester,
-    detail: `Week ${w.week}: the curriculum overview holds ${held.length} objective(s) `
-      + `and the coverage tracker holds ${w.objectives.length}. `
-      + 'Neither was written; decide which document is current for this week.',
-    files: [seen.source_file ?? '(overview)', w.source_file],
+    week: w.week,
+    overview: { source: seen.source_file ?? '(overview)', objectives: held },
+    tracker: { source: w.source_file, objectives: w.objectives },
   });
   skipped.alreadyHeld++;
 }
@@ -157,13 +190,44 @@ console.log(`  ${insert.length} weeks the registry does not hold at all`);
 console.log(`  ${fill.length} weeks the registry holds with no objectives`);
 console.log(`  ${skipped.alreadyHeld} weeks the registry already holds objectives for, left alone`);
 console.log(`  ${skipped.notTaught} weeks falling in a break, skipped - the school teaches nothing then`);
-console.log(`  ${conflicts.length} of those disagree and would be raised for a decision`);
+console.log(`  ${conflicts.length} of those disagree - written to the report, not to the queue`);
 for (const [id, n] of skipped.unknownSubject) {
   console.log(`  ! ${n} weeks for subject "${id}" - no such row in the subject table`);
 }
 
+// ── the disagreements ───────────────────────────────────────────────────────
+//
+// Written whatever else this run does, including a dry run: reading them is the
+// point, and reading them should not cost a write to anything.
+if (conflicts.length) {
+  const bySubject = new Map();
+  for (const c of conflicts) {
+    const k = `${c.subject_id} ${c.year_group} S${c.semester}`;
+    bySubject.set(k, [...(bySubject.get(k) ?? []), c.week].sort((a, b) => a - b));
+  }
+
+  writeFileSync(REPORT, JSON.stringify({
+    academic_year: YEAR,
+    generated_at: new Date().toISOString(),
+    note: 'Weeks the curriculum overview and the coverage tracker both describe, '
+      + 'differently. Nothing was written for any of them and the overview stands, '
+      + 'because choosing between two documents is a decision for the head of '
+      + 'department. Each entry carries both sets of objectives so they can be read '
+      + 'side by side without opening either document.',
+    weeks: conflicts.length,
+    by_subject: Object.fromEntries([...bySubject].sort()),
+    conflicts,
+  }, null, 1));
+
+  console.log(`\n  disagreements, by subject - full text in ${REPORT}:`);
+  for (const [k, weeks] of [...bySubject].sort().slice(0, 12)) {
+    console.log(`    ${k.padEnd(26)} week${weeks.length === 1 ? '' : 's'} ${weeks.join(', ')}`);
+  }
+  if (bySubject.size > 12) console.log(`    ... and ${bySubject.size - 12} more subjects`);
+}
+
 if (!write) {
-  console.log('\nnothing written. Pass --write to load these.');
+  console.log('\nnothing loaded into the registry. Pass --write to load these.');
   process.exit(0);
 }
 
@@ -183,8 +247,18 @@ for (const f of fill) {
   else filled++;
 }
 
-if (conflicts.length) {
-  const { error } = await db.from('registry_gap').insert(conflicts);
+if (queueConflicts && conflicts.length) {
+  const { error } = await db.from('registry_gap').insert(conflicts.map(c => ({
+    academic_year: YEAR,
+    kind: 'conflict',
+    year_group: c.year_group,
+    subject: c.subject_id,
+    semester: c.semester,
+    detail: `Week ${c.week}: the curriculum overview holds ${c.overview.objectives.length} `
+      + `objective(s) and the coverage tracker holds ${c.tracker.objectives.length}. `
+      + 'Neither was written; decide which document is current for this week.',
+    files: [c.overview.source, c.tracker.source],
+  })));
   // registry_gap arrived in 0006 and migrations here are applied by hand, so a
   // missing table is a missing worklist rather than a failed load.
   if (error) console.error(`  ! conflicts not recorded: ${error.message}`);
