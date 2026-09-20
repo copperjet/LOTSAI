@@ -11,6 +11,7 @@
  *   - no row at all for that year group, subject, semester and week  -> insert
  *   - a row whose `objectives` is empty                              -> fill it
  *   - a row that already holds objectives                            -> leave it
+ *   - any week the calendar calls a break                            -> skip it
  *
  * A week both sources hold, with objectives that differ, is recorded in
  * `registry_gap` as a conflict for the head of department to decide in
@@ -54,6 +55,26 @@ if (subjectError) {
 }
 const known = new Set(subjects.map(s => s.id));
 
+// Weeks the school does not teach in.
+//
+// The tracker is a grid, so every class has a row for every week of the term whether
+// or not anything happens in it, and a teacher filling the grid down writes the next
+// unit into the break week as readily as into any other. The registry's own break
+// weeks carry no objectives - scripts/ingest_overviews.py drops the "Mid-Term Break"
+// line rather than importing it as something to teach - which would make them look
+// exactly like a week waiting to be filled. Eight of them were.
+//
+// Only 'break' is refused. A revision week revises something and an exam week
+// examines something, and both are weeks a teacher plans for.
+const { data: calendar, error: calendarError } = await db.from('school_week')
+  .select('semester, week_number, week_type').eq('academic_year', YEAR);
+if (calendarError) {
+  console.error(`cannot read the calendar: ${calendarError.message}`);
+  process.exit(1);
+}
+const notTaught = new Set(calendar.filter(w => w.week_type === 'break')
+  .map(w => `S${w.semester}|${w.week_number}`));
+
 const { data: existing, error: registryError } = await db.from('curriculum_week')
   .select('id, year_group, subject_id, semester, week_number, objectives, source_file')
   .eq('academic_year', YEAR);
@@ -66,13 +87,15 @@ const had = new Map(existing.map(r =>
   [`${r.year_group}|${r.subject_id}|S${r.semester}|${r.week_number}`, r]));
 
 const insert = [], fill = [], conflicts = [];
-const skipped = { unknownSubject: new Map(), alreadyHeld: 0 };
+const skipped = { unknownSubject: new Map(), alreadyHeld: 0, notTaught: 0 };
 
 for (const w of rows) {
   if (!known.has(w.subject_id)) {
     skipped.unknownSubject.set(w.subject_id, (skipped.unknownSubject.get(w.subject_id) ?? 0) + 1);
     continue;
   }
+
+  if (notTaught.has(`S${w.semester}|${w.week}`)) { skipped.notTaught++; continue; }
 
   const row = {
     academic_year: YEAR,
@@ -133,6 +156,7 @@ console.log(`\n${rows.length} weeks read from the tracker`);
 console.log(`  ${insert.length} weeks the registry does not hold at all`);
 console.log(`  ${fill.length} weeks the registry holds with no objectives`);
 console.log(`  ${skipped.alreadyHeld} weeks the registry already holds objectives for, left alone`);
+console.log(`  ${skipped.notTaught} weeks falling in a break, skipped - the school teaches nothing then`);
 console.log(`  ${conflicts.length} of those disagree and would be raised for a decision`);
 for (const [id, n] of skipped.unknownSubject) {
   console.log(`  ! ${n} weeks for subject "${id}" - no such row in the subject table`);
