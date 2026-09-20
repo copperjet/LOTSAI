@@ -56,6 +56,31 @@ except ImportError:
 # false positives — verified against the full ingest before changing it.
 REF = re.compile(r'\b(\d{1,2}[A-Z]{1,2}[a-z]{0,2}\.\d{2})\b')
 
+# A line of the school's calendar that happens to sit in an objectives cell.
+#
+# The overviews are written for people, so a week that teaches nothing says why in
+# the same column as the weeks that do. Matched on the whole line rather than on a
+# word anywhere in it: "the last day of the Roman republic" is a history objective,
+# and "Last day of school for students" is not. Anchored, and short — a calendar
+# note is a phrase, never a sentence about learning.
+CALENDAR_NOTE = re.compile(
+    r'^(?:'
+    r'(?:mid[\s-]?term|half[\s-]?term|midterm)\s*break'
+    r'|(?:term|semester)\s*\d?\s*(?:begins|starts|ends|resumes)'
+    r'|last day (?:of|for) (?:school|term|students)'
+    r'|school (?:opens|closes|reopens)'
+    r'|(?:students?|learners?) report back'
+    r'|(?:public |national )?holiday'
+    r'|no school'
+    r'|inset day'
+    r'|sports day'
+    r'|prize[\s-]?giving'
+    r'|parents?.{0,3} (?:evening|conference|day)'
+    r'|reports? (?:are )?(?:finalised|finalized|sent home|go home|issued)'
+    r'|(?:exam|examination)s?\s*(?:week|period|begin|start)'
+    r')\b.{0,80}$',
+    re.I)
+
 # A unit cell in an overview that has a unit column: "UNIT 7.1 ALGORITHMS,
 # FLOWCHARTS AND SUB-ROUTINES". Anchored, so a mention of a unit inside an
 # objective does not turn that column into the unit column.
@@ -226,12 +251,22 @@ def split_objectives(text: str):
     """
     Return [{ref, text}]. A reference is copied verbatim when present.
     When absent the objective still imports — as topic-only, flagged.
+
+    Calendar notes are dropped. The overviews carry them in the same cells as the
+    objectives — "Mid-Term Break", "Last day of school for students; reports
+    finalised during the following week" — and read as one, they become things the
+    school teaches. 33 of them reached the registry, where lib/planner.ts offers
+    them as objectives to build a lesson on and lib/objectives.ts reads them back
+    to a teacher asking what a week covers. A break week keeping no objectives is
+    the right answer for a week that teaches nothing.
     """
     body = re.split(r'\bResources\b', text, flags=re.I)[0]
     lines = unwrap([l.strip(' -•\t') for l in body.split('\n') if l.strip(' -•\t')])
     out = []
     for line in lines:
         if len(line) < 12:
+            continue
+        if CALENDAR_NOTE.search(line):
             continue
         m = REF.search(line)
         out.append({'ref': m.group(1) if m else None,
