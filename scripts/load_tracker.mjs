@@ -98,7 +98,7 @@ const notTaught = new Set(calendar.filter(w => w.week_type === 'break')
   .map(w => `S${w.semester}|${w.week_number}`));
 
 const { data: existing, error: registryError } = await db.from('curriculum_week')
-  .select('id, year_group, subject_id, semester, week_number, objectives, source_file')
+  .select('*')
   .eq('academic_year', YEAR);
 if (registryError) {
   console.error(`cannot read the registry: ${registryError.message}`);
@@ -107,6 +107,21 @@ if (registryError) {
 
 const had = new Map(existing.map(r =>
   [`${r.year_group}|${r.subject_id}|S${r.semester}|${r.week_number}`, r]));
+
+/**
+ * Whether the registry can record where an objective came from.
+ *
+ * `ref_source` arrives in 0005_objective_provenance.sql, and migrations here are
+ * applied by hand in the SQL editor - so the column may simply not be there, and an
+ * insert naming it fails the whole batch rather than one row. Nothing in the
+ * application reads it today; it is a marker for telling a week a teacher typed into
+ * the tracker apart from a week a parser read out of an overview, which matters when
+ * somebody later asks why a signed-off week says what it says.
+ *
+ * So it is written when it exists and skipped when it does not, and the run says
+ * which happened rather than failing or quietly dropping provenance.
+ */
+const hasProvenance = existing.length > 0 && 'ref_source' in existing[0];
 
 /** A week's objectives as one comparable run of text: refs kept, everything that
  *  differs between a PDF and a spreadsheet cell thrown away. */
@@ -139,7 +154,7 @@ for (const w of rows) {
     activities: [],
     resources: [],
     source_file: w.source_file,
-    ref_source: 'hod',
+    ...(hasProvenance ? { ref_source: 'hod' } : {}),
   };
 
   const seen = had.get(`${w.year_group}|${w.subject_id}|S${w.semester}|${w.week}`);
@@ -190,6 +205,11 @@ console.log(`  ${insert.length} weeks the registry does not hold at all`);
 console.log(`  ${fill.length} weeks the registry holds with no objectives`);
 console.log(`  ${skipped.alreadyHeld} weeks the registry already holds objectives for, left alone`);
 console.log(`  ${skipped.notTaught} weeks falling in a break, skipped - the school teaches nothing then`);
+if (!hasProvenance) {
+  console.log('  ! curriculum_week has no ref_source column, so these weeks will not be');
+  console.log('    marked as tracker-written. Apply 0005_objective_provenance.sql and re-run');
+  console.log('    to record it. Nothing else depends on it.');
+}
 console.log(`  ${conflicts.length} of those disagree - written to the report, not to the queue`);
 for (const [id, n] of skipped.unknownSubject) {
   console.log(`  ! ${n} weeks for subject "${id}" - no such row in the subject table`);
@@ -240,8 +260,8 @@ if (insert.length) {
 let filled = 0;
 for (const f of fill) {
   const { error } = await db.from('curriculum_week')
-    .update({ objectives: f.row.objectives, ref_source: 'hod',
-              topic_label: f.row.topic_label })
+    .update({ objectives: f.row.objectives, topic_label: f.row.topic_label,
+              ...(hasProvenance ? { ref_source: 'hod' } : {}) })
     .eq('id', f.id);
   if (error) console.error(`  x ${f.row.subject_id} ${f.row.year_group} W${f.row.week_number}: ${error.message}`);
   else filled++;
